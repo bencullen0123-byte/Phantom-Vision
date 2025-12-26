@@ -25,7 +25,9 @@ export const ghostTargets = pgTable("ghost_targets", {
   merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
   email: text("email").notNull(),
   amount: integer("amount").notNull(),
+  invoiceId: text("invoice_id").notNull(),
   discoveredAt: timestamp("discovered_at").defaultNow().notNull(),
+  purgeAt: timestamp("purge_at").notNull(),
 });
 
 export const insertGhostTargetSchema = createInsertSchema(ghostTargets).omit({
@@ -39,13 +41,16 @@ export type GhostTarget = typeof ghostTargets.$inferSelect;
 // Liquidity oracle table - stores anonymized metadata
 export const liquidityOracle = pgTable("liquidity_oracle", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
   businessCategory: text("business_category").notNull(),
   dayOfWeek: integer("day_of_week").notNull(),
   hourOfDay: integer("hour_of_day").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 });
 
 export const insertLiquidityOracleSchema = createInsertSchema(liquidityOracle).omit({
   id: true,
+  recordedAt: true,
 });
 
 export type InsertLiquidityOracle = z.infer<typeof insertLiquidityOracleSchema>;
