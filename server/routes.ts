@@ -1,11 +1,15 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { encrypt, runSecurityCheck } from "./utils/crypto";
+import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
 // Run security check on module load
 runSecurityCheck();
+
+// Cookie name for OAuth state
+const OAUTH_STATE_COOKIE = "phantom_oauth_state";
 
 // Validate Stripe secrets on startup (but don't crash - log warning)
 function validateStripeSecrets(): boolean {
@@ -44,6 +48,11 @@ function getStripeClient(): Stripe | null {
   return stripeClient;
 }
 
+// Generate cryptographically secure random state
+function generateState(): string {
+  return randomBytes(32).toString("hex");
+}
+
 // Log configuration status on startup
 const stripeConfigured = validateStripeSecrets();
 
@@ -63,7 +72,7 @@ export async function registerRoutes(
   });
 
   // Stripe OAuth initiation - redirects to Stripe Connect authorization
-  app.get("/api/auth/stripe", (req, res) => {
+  app.get("/api/auth/stripe", (req: Request, res: Response) => {
     const clientId = process.env.STRIPE_CLIENT_ID;
     
     if (!clientId) {
@@ -74,20 +83,70 @@ export async function registerRoutes(
       });
     }
 
+    // Generate random state for CSRF protection
+    const state = generateState();
+    
+    // Store state in secure HTTP-only cookie
+    res.cookie(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 10 * 60 * 1000, // 10 minutes expiry
+      path: "/",
+    });
+
     const redirectUri = `${getBaseUrl(req)}/api/auth/callback`;
     console.log("[AUTH] Callback URL:", redirectUri);
+    console.log("[AUTH] State generated for CSRF protection");
     
-    const authUrl = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${encodeURIComponent(redirectUri)}`;
+    const authUrl = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
     
     console.log("[AUTH] Redirecting to Stripe Connect authorization");
     res.redirect(authUrl);
   });
 
   // Stripe OAuth callback - receives authorization code and exchanges for token
-  app.get("/api/auth/callback", async (req, res) => {
-    const { code, error, error_description } = req.query;
+  app.get("/api/auth/callback", async (req: Request, res: Response) => {
+    const { code, error, error_description, state } = req.query;
 
-    // Check Stripe client availability first
+    // Validate state parameter for CSRF protection
+    const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
+    
+    // Clear the state cookie immediately
+    res.clearCookie(OAUTH_STATE_COOKIE, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+    });
+
+    if (!state || typeof state !== "string") {
+      console.error("[AUTH] Missing state parameter - possible CSRF attack");
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Invalid request - missing state parameter" 
+      });
+    }
+
+    if (!storedState) {
+      console.error("[AUTH] Missing stored state cookie - session may have expired");
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Session expired - please try connecting again" 
+      });
+    }
+
+    if (state !== storedState) {
+      console.error("[AUTH] State mismatch - possible CSRF attack");
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Invalid request - state mismatch" 
+      });
+    }
+
+    console.log("[AUTH] State validation passed");
+
+    // Check Stripe client availability
     const stripe = getStripeClient();
     if (!stripe) {
       console.error("[AUTH] Stripe client unavailable - STRIPE_SECRET_KEY not configured");
