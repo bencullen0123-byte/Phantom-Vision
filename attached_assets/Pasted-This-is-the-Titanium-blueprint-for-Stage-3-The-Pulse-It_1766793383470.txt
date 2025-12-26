@@ -1,0 +1,42 @@
+This is the "Titanium" blueprint for Stage 3: The Pulse. It balances sophisticated data-led timing with a zero-friction onboarding experience for your merchants.
+
+Copy and paste this consolidated prompt to the Replit Agent to activate the recovery engine:
+
+Prompt for Replit Agent: Stage 3 Implementation
+"Stage 2 is verified. Let's build Stage 3: The Pulse. This phase turns our 'Ghost Hunter' data into an automated recovery machine.
+
+Task 1: Database Future-Proofing Update the merchants table schema with the following columns:
+
+custom_email_template (text, nullable) - For future custom branding.
+
+recovery_strategy (text, default: 'oracle') - To toggle between 'oracle' and 'manual'.
+
+business_name & support_email (text) - To be captured from the Stripe account object.
+
+Task 2: The Pulse Mailer (server/services/pulseMailer.ts)
+
+Integrate the Resend SDK using process.env.RESEND_API_KEY.
+
+Function sendRecoveryEmail(to, amount, invoiceUrl, merchant):
+
+From: "${merchant.businessName} <recovery@yourverifieddomain.com>" (Use a placeholder domain for now).
+
+Reply-To: Use the merchant.support_email.
+
+Content: If custom_email_template exists, use it. Otherwise, use this default: 'Hi, it looks like the latest payment for [Business] didn't go through. You can update your payment method and clear the balance here: [invoiceUrl]. Thanks!'
+
+Task 3: The Pulse Engine (server/services/pulseEngine.ts)
+
+Create a function processQueue():
+
+Find all ghost_targets that need processing.
+
+The Oracle Logic: For merchants on the 'oracle' strategy, check the liquidity_oracle for their top 'Golden Hour' (Day/Hour).
+
+If the current UTC time matches a High-Liquidity window (or if it's the 1st attempt and within a reasonable buffer), trigger the pulseMailer.
+
+Update last_emailed_at and email_count in the ghost_targets table.
+
+Task 4: Automation Endpoint
+
+Create GET /api/pulse/run: This will be our manual trigger for now. It should run the processQueue and return a summary of emails sent and the next scheduled 'Golden Hour' window.
