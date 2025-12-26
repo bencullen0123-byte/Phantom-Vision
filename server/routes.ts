@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { encrypt, selfTest } from "./utils/crypto";
+import { runAuditForMerchant } from "./services/ghostHunter";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
@@ -231,6 +232,89 @@ export async function registerRoutes(
       const errorCode = err?.code || "exchange_failed";
       const errorMessage = err?.message || "Failed to complete authorization";
       return res.redirect(`/api/auth/error?reason=token_exchange_failed&code=${encodeURIComponent(errorCode)}&description=${encodeURIComponent(errorMessage)}`);
+    }
+  });
+
+  // Audit endpoint - runs ghost scan for a merchant
+  app.get("/api/audit/run", async (req: Request, res: Response) => {
+    const { merchant_id } = req.query;
+
+    if (!merchant_id || typeof merchant_id !== "string") {
+      // If no merchant_id provided, try to get the first connected merchant
+      const merchants = await storage.getAllMerchants();
+      
+      if (merchants.length === 0) {
+        return res.status(400).json({
+          status: "error",
+          message: "No connected merchants found. Please connect a Stripe account first."
+        });
+      }
+
+      // Use the first merchant for now
+      const targetMerchant = merchants[0];
+      console.log(`[AUDIT] Running audit for merchant: ${targetMerchant.id}`);
+
+      try {
+        const result = await runAuditForMerchant(targetMerchant.id);
+        
+        if (result.errors.length > 0) {
+          console.error("[AUDIT] Errors during scan:", result.errors);
+        }
+
+        return res.json({
+          status: "success",
+          merchant_id: targetMerchant.stripeUserId,
+          total_ghosts_found: result.total_ghosts_found,
+          total_revenue_at_risk: result.total_revenue_at_risk,
+          total_revenue_at_risk_formatted: `$${(result.total_revenue_at_risk / 100).toFixed(2)}`,
+          oracle_data_points: result.oracle_data_points,
+          errors: result.errors
+        });
+      } catch (error: any) {
+        console.error("[AUDIT] Scan failed:", error);
+        return res.status(500).json({
+          status: "error",
+          message: "Audit scan failed",
+          error: error.message
+        });
+      }
+    }
+
+    // If merchant_id is provided, look up by internal ID
+    const merchant = await storage.getMerchant(merchant_id);
+    
+    if (!merchant) {
+      return res.status(404).json({
+        status: "error",
+        message: "Merchant not found"
+      });
+    }
+
+    console.log(`[AUDIT] Running audit for merchant: ${merchant.id}`);
+
+    try {
+      const result = await runAuditForMerchant(merchant.id);
+      
+      if (result.errors.length > 0) {
+        console.error("[AUDIT] Errors during scan:", result.errors);
+      }
+
+      return res.json({
+        status: "success",
+        merchant_id: merchant.stripeUserId,
+        total_ghosts_found: result.total_ghosts_found,
+        total_revenue_at_risk: result.total_revenue_at_risk,
+        total_revenue_at_risk_formatted: `$${(result.total_revenue_at_risk / 100).toFixed(2)}`,
+        oracle_data_points: result.oracle_data_points,
+        errors: result.errors
+      });
+    } catch (error: any) {
+      console.error("[AUDIT] Scan failed:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Audit scan failed",
+        error: error.message
+      });
     }
   });
 
