@@ -1,0 +1,73 @@
+1. The Vision: PHANTOM (Revenue Intelligence)
+PHANTOM is not a "dunning" tool; it is a Revenue Hunter. It identifies "Ghost Users"—customers who retain active SaaS access despite failed payments—and executes a recovery "Hunt" driven by a proprietary Liquidity Oracle.
+
+The Direction of Travel (Future Stages)
+Stage 1: The Titanium Gate (Foundation & Security).
+
+Stage 2: The Ghost Hunter (Historical Audit & Forensic Data Extraction).
+
+Stage 3: The Recovery Orchestrator (BYOI Messaging via Resend/Twilio).
+
+Stage 4: The Oracle & Enforcement (Aggregated Data Moat & Access Shield API).
+
+2. Technical Framework: Stage 1 (The Titanium Gate)
+The goal of Stage 1 is to build an unbreakable, headless backend capable of securely handling merchant identities and encryption.
+
+A. Security Vault (src/utils/crypto.js)
+Algorithm: Use aes-256-gcm for authenticated encryption.
+
+Secrets: Utilize process.env.ENCRYPTION_KEY for the master secret.
+
+Implementation: Logic must generate a unique 16-byte Initialization Vector (IV) for every record and store the resulting Authentication Tag.
+
+Integrity: A selfTest() must run on every server boot. It must encrypt and decrypt a test string; if the result is a mismatch, the server must execute process.exit(1).
+
+B. Data Architecture (PostgreSQL)
+Initialize the following schema using Replit Managed Postgres:
+
+merchants Table: Stores encrypted Stripe access_token, iv, tag, and stripe_user_id.
+
+ghost_targets Table: Stores transient PII (Email, Amount). Must include a discovered_at timestamp for a future 90-day purge policy.
+
+liquidity_oracle Table: Stores anonymized metadata (Business Category, Day of Week, Hour of Day).
+
+C. Integration: The OAuth Handshake
+Route /api/auth/stripe: Redirects to the Stripe Connect authorization page using STRIPE_CLIENT_ID.
+
+Route /api/auth/callback: Receives the code, exchanges it for a token via the Stripe SDK, encrypts that token via the Vault, and stores it in the database.
+
+3. Success Criteria (Acceptance Tests)
+For the Replit Agent to successfully "close" Stage 1, it must demonstrate the following:
+
+Boot Success: The console must log [SECURITY] Vault self-test passed: AES-256-GCM Active.
+
+Encryption Proof: A manual query of the merchants table must show the encrypted_token, iv, and tag as non-readable hex strings.
+
+Headless Flow: The base URL / should serve a single <a> tag to "Connect Stripe." Upon return, the browser should display a JSON response: { "status": "success", "message": "Merchant Authorized" }.
+
+Error Handling: If the ENCRYPTION_KEY is missing or the database is disconnected, the server should fail gracefully with specific logs.
+
+4. The Agent Prompt
+Copy and paste this to the Replit Agent:
+
+"I am building PHANTOM, a headless revenue intelligence engine. Act as a Lead Engineer.
+
+Task: Initialize Stage 1 (The Titanium Gate)
+
+Setup a Node.js Express server using pg and stripe SDKs.
+
+Build src/utils/crypto.js using AES-256-GCM. It must handle encryption/decryption with unique iv and tag storage.
+
+Implement a selfTest() on startup that exits the process if encryption fails.
+
+Initialize the Postgres schema for merchants, ghost_targets, and liquidity_oracle as defined in my brief.
+
+Implement the /api/auth/stripe and /api/auth/callback OAuth routes.
+
+Constraints:
+
+Use Replit Secrets for STRIPE_SECRET_KEY, STRIPE_CLIENT_ID, and ENCRYPTION_KEY.
+
+Plan Mode First: Present the database schema and the crypto.js logic for approval before writing code.
+
+No UI/HTML beyond a single trigger link at the root. All endpoints must return JSON.
