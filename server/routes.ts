@@ -63,7 +63,7 @@ export async function registerRoutes(
   });
 
   // Stripe OAuth initiation - redirects to Stripe Connect authorization
-  app.get("/api/auth/stripe", (_req, res) => {
+  app.get("/api/auth/stripe", (req, res) => {
     const clientId = process.env.STRIPE_CLIENT_ID;
     
     if (!clientId) {
@@ -74,7 +74,8 @@ export async function registerRoutes(
       });
     }
 
-    const redirectUri = `${getBaseUrl()}/api/auth/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/callback`;
+    console.log("[AUTH] Callback URL:", redirectUri);
     
     const authUrl = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${encodeURIComponent(redirectUri)}`;
     
@@ -170,11 +171,23 @@ export async function registerRoutes(
   return httpServer;
 }
 
-function getBaseUrl(): string {
-  // In production, use the Replit URL
+function getBaseUrl(req?: { headers?: { host?: string } }): string {
+  // Use REPLIT_DEV_DOMAIN for development URLs (modern Replit format)
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  
+  // Fallback to request host header if available
+  if (req?.headers?.host) {
+    const protocol = req.headers.host.includes('localhost') ? 'http' : 'https';
+    return `${protocol}://${req.headers.host}`;
+  }
+  
+  // Legacy Replit URL format
   if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
     return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
   }
+  
   // Fallback for local development
   return "http://localhost:5000";
 }
