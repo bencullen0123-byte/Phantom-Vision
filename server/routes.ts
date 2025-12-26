@@ -1,15 +1,26 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { encrypt, runSecurityCheck } from "./utils/crypto";
+import { encrypt, selfTest } from "./utils/crypto";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
-// Run security check on module load
-runSecurityCheck();
-
 // Cookie name for OAuth state
 const OAUTH_STATE_COOKIE = "phantom_oauth_state";
+
+// Track vault status
+let vaultActive = false;
+
+// Run security check on module load
+function runSecurityCheck(): void {
+  vaultActive = selfTest();
+  if (!vaultActive) {
+    console.error("[SECURITY] Critical security failure - shutting down");
+    process.exit(1);
+  }
+}
+
+runSecurityCheck();
 
 // Validate Stripe secrets on startup (but don't crash - log warning)
 function validateStripeSecrets(): boolean {
@@ -61,13 +72,40 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // Health check endpoint
+  // Health check endpoint with vault status
   app.get("/api/health", (_req, res) => {
     res.json({ 
       status: "ok", 
       service: "phantom", 
       stage: "titanium-gate",
-      stripeConfigured: stripeConfigured
+      stripeConfigured: stripeConfigured,
+      vaultActive: vaultActive
+    });
+  });
+
+  // Success endpoint - clean JSON response after OAuth
+  app.get("/api/auth/success", (req: Request, res: Response) => {
+    const { merchant_id } = req.query;
+    
+    res.json({
+      status: "authorized",
+      merchant_id: merchant_id || "unknown"
+    });
+  });
+
+  // Error endpoint - logs error and returns structured response
+  app.get("/api/auth/error", (req: Request, res: Response) => {
+    const { reason, code, description } = req.query;
+    
+    // Log detailed error for review
+    console.error("[AUTH ERROR] Reason:", reason);
+    if (code) console.error("[AUTH ERROR] Stripe Code:", code);
+    if (description) console.error("[AUTH ERROR] Description:", description);
+    
+    res.status(400).json({
+      status: "error",
+      reason: reason || "unknown_error",
+      message: description || getErrorMessage(reason as string)
     });
   });
 
@@ -77,20 +115,17 @@ export async function registerRoutes(
     
     if (!clientId) {
       console.error("[AUTH] STRIPE_CLIENT_ID is not configured");
-      return res.status(500).json({ 
-        status: "error", 
-        message: "Stripe Connect is not configured" 
-      });
+      return res.redirect(`/api/auth/error?reason=config_error&description=${encodeURIComponent("Stripe Connect is not configured")}`);
     }
 
     // Generate random state for CSRF protection
     const state = generateState();
     
-    // Store state in secure HTTP-only cookie
+    // Store state in secure HTTP-only cookie with sameSite: none for cross-domain
     res.cookie(OAUTH_STATE_COOKIE, state, {
       httpOnly: true,
       secure: true,
-      sameSite: "lax",
+      sameSite: "none",
       maxAge: 10 * 60 * 1000, // 10 minutes expiry
       path: "/",
     });
@@ -116,32 +151,23 @@ export async function registerRoutes(
     res.clearCookie(OAUTH_STATE_COOKIE, {
       httpOnly: true,
       secure: true,
-      sameSite: "lax",
+      sameSite: "none",
       path: "/",
     });
 
     if (!state || typeof state !== "string") {
       console.error("[AUTH] Missing state parameter - possible CSRF attack");
-      return res.status(400).json({ 
-        status: "error", 
-        message: "Invalid request - missing state parameter" 
-      });
+      return res.redirect("/api/auth/error?reason=missing_state&description=" + encodeURIComponent("Invalid request - missing state parameter"));
     }
 
     if (!storedState) {
       console.error("[AUTH] Missing stored state cookie - session may have expired");
-      return res.status(400).json({ 
-        status: "error", 
-        message: "Session expired - please try connecting again" 
-      });
+      return res.redirect("/api/auth/error?reason=session_expired&description=" + encodeURIComponent("Session expired - please try connecting again"));
     }
 
     if (state !== storedState) {
       console.error("[AUTH] State mismatch - possible CSRF attack");
-      return res.status(400).json({ 
-        status: "error", 
-        message: "Invalid request - state mismatch" 
-      });
+      return res.redirect("/api/auth/error?reason=state_mismatch&description=" + encodeURIComponent("Security check failed - please try again"));
     }
 
     console.log("[AUTH] State validation passed");
@@ -150,26 +176,17 @@ export async function registerRoutes(
     const stripe = getStripeClient();
     if (!stripe) {
       console.error("[AUTH] Stripe client unavailable - STRIPE_SECRET_KEY not configured");
-      return res.status(500).json({ 
-        status: "error", 
-        message: "Stripe integration is not configured" 
-      });
+      return res.redirect("/api/auth/error?reason=config_error&description=" + encodeURIComponent("Stripe integration is not configured"));
     }
 
     if (error) {
       console.error("[AUTH] Stripe OAuth error:", error, error_description);
-      return res.status(400).json({ 
-        status: "error", 
-        message: error_description || "Authorization failed" 
-      });
+      return res.redirect(`/api/auth/error?reason=stripe_error&code=${encodeURIComponent(error as string)}&description=${encodeURIComponent((error_description as string) || "Authorization failed")}`);
     }
 
     if (!code || typeof code !== "string") {
       console.error("[AUTH] No authorization code received");
-      return res.status(400).json({ 
-        status: "error", 
-        message: "No authorization code received" 
-      });
+      return res.redirect("/api/auth/error?reason=no_code&description=" + encodeURIComponent("No authorization code received"));
     }
 
     try {
@@ -183,10 +200,7 @@ export async function registerRoutes(
 
       if (!access_token || !stripe_user_id) {
         console.error("[AUTH] Invalid token response from Stripe");
-        return res.status(500).json({ 
-          status: "error", 
-          message: "Invalid token response from Stripe" 
-        });
+        return res.redirect("/api/auth/error?reason=invalid_token&description=" + encodeURIComponent("Invalid token response from Stripe"));
       }
 
       // Check if merchant already exists
@@ -194,10 +208,7 @@ export async function registerRoutes(
       
       if (existingMerchant) {
         console.log("[AUTH] Merchant already authorized:", stripe_user_id);
-        return res.json({ 
-          status: "success", 
-          message: "Merchant Authorized" 
-        });
+        return res.redirect(`/api/auth/success?merchant_id=${encodeURIComponent(stripe_user_id)}`);
       }
 
       // Encrypt the access token using the Vault
@@ -213,21 +224,33 @@ export async function registerRoutes(
 
       console.log("[AUTH] New merchant authorized and stored:", stripe_user_id);
       
-      res.json({ 
-        status: "success", 
-        message: "Merchant Authorized" 
-      });
+      res.redirect(`/api/auth/success?merchant_id=${encodeURIComponent(stripe_user_id)}`);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("[AUTH] Token exchange failed:", err);
-      res.status(500).json({ 
-        status: "error", 
-        message: "Failed to complete authorization" 
-      });
+      const errorCode = err?.code || "exchange_failed";
+      const errorMessage = err?.message || "Failed to complete authorization";
+      return res.redirect(`/api/auth/error?reason=token_exchange_failed&code=${encodeURIComponent(errorCode)}&description=${encodeURIComponent(errorMessage)}`);
     }
   });
 
   return httpServer;
+}
+
+// Helper function to get user-friendly error messages
+function getErrorMessage(reason: string): string {
+  const messages: Record<string, string> = {
+    config_error: "The system is not properly configured. Please contact support.",
+    missing_state: "Invalid request. Please try connecting again.",
+    session_expired: "Your session has expired. Please try connecting again.",
+    state_mismatch: "Security check failed. Please try connecting again.",
+    stripe_error: "Stripe authorization failed. Please try again.",
+    no_code: "Authorization was not completed. Please try again.",
+    invalid_token: "Could not verify your Stripe account. Please try again.",
+    token_exchange_failed: "Failed to complete the connection. Please try again.",
+  };
+  
+  return messages[reason] || "An unexpected error occurred. Please try again.";
 }
 
 function getBaseUrl(req?: { headers?: { host?: string } }): string {

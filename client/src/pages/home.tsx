@@ -27,7 +27,12 @@ export default function Home() {
               Connect your Stripe account to begin hunting ghost users and recovering lost revenue.
             </p>
           </div>
-          <a href={stripeConnectUrl} data-testid="link-connect-stripe">
+          <a 
+            href={stripeConnectUrl} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            data-testid="link-connect-stripe"
+          >
             <Button className="w-full gap-2" size="lg">
               <SiStripe className="h-5 w-5" />
               Connect Stripe
