@@ -25,12 +25,13 @@ export type InsertMerchant = z.infer<typeof insertMerchantSchema>;
 export type Merchant = typeof merchants.$inferSelect;
 
 // Ghost targets table - stores transient PII for recovery
+// Status values: 'pending', 'recovered', 'exhausted'
 export const ghostTargets = pgTable("ghost_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
   email: text("email").notNull(),
   amount: integer("amount").notNull(),
-  invoiceId: text("invoice_id").notNull(),
+  invoiceId: text("invoice_id").notNull().unique(),
   discoveredAt: timestamp("discovered_at").defaultNow().notNull(),
   purgeAt: timestamp("purge_at").notNull(),
   lastEmailedAt: timestamp("last_emailed_at"),
@@ -64,3 +65,21 @@ export const insertLiquidityOracleSchema = createInsertSchema(liquidityOracle).o
 
 export type InsertLiquidityOracle = z.infer<typeof insertLiquidityOracleSchema>;
 export type LiquidityOracle = typeof liquidityOracle.$inferSelect;
+
+// System logs table - records heartbeat runs for health monitoring
+export const systemLogs = pgTable("system_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobName: text("job_name").notNull(),
+  status: text("status").notNull(),
+  details: text("details"),
+  errorMessage: text("error_message"),
+  runAt: timestamp("run_at").defaultNow().notNull(),
+});
+
+export const insertSystemLogSchema = createInsertSchema(systemLogs).omit({
+  id: true,
+  runAt: true,
+});
+
+export type InsertSystemLog = z.infer<typeof insertSystemLogSchema>;
+export type SystemLog = typeof systemLogs.$inferSelect;
