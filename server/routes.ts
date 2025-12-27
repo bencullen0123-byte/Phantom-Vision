@@ -5,6 +5,7 @@ import { encrypt, selfTest } from "./utils/crypto";
 import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent } from "./services/webhookHandler";
+import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
@@ -451,6 +452,58 @@ export async function registerRoutes(
       });
     }
   });
+
+  // System Health endpoint - returns scheduler status and recent logs
+  app.get("/api/system/health", async (_req: Request, res: Response) => {
+    try {
+      const health = await getSystemHealth();
+      
+      return res.json({
+        status: "success",
+        sentinel_active: true,
+        last_ghost_hunter: health.lastGhostHunterRun,
+        last_pulse_engine: health.lastPulseEngineRun,
+        recent_logs: health.recentLogs.map(log => ({
+          job: log.jobName,
+          status: log.status,
+          details: log.details,
+          error: log.errorMessage,
+          run_at: log.runAt,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[HEALTH] Failed to get system health:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve health status",
+        error: error.message,
+      });
+    }
+  });
+
+  // Manual trigger endpoints for testing
+  app.post("/api/sentinel/ghost-hunter", async (_req: Request, res: Response) => {
+    console.log("[SENTINEL] Manual Ghost Hunter trigger");
+    try {
+      await runGhostHunterJob();
+      return res.json({ status: "success", message: "Ghost Hunter job triggered" });
+    } catch (error: any) {
+      return res.status(500).json({ status: "error", error: error.message });
+    }
+  });
+
+  app.post("/api/sentinel/pulse-engine", async (_req: Request, res: Response) => {
+    console.log("[SENTINEL] Manual Pulse Engine trigger");
+    try {
+      await runPulseEngineJob();
+      return res.json({ status: "success", message: "Pulse Engine job triggered" });
+    } catch (error: any) {
+      return res.status(500).json({ status: "error", error: error.message });
+    }
+  });
+
+  // Start the Sentinel scheduler
+  startScheduler();
 
   return httpServer;
 }
