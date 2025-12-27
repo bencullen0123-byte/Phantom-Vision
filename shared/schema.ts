@@ -10,6 +10,10 @@ export const merchants = pgTable("merchants", {
   encryptedToken: text("encrypted_token").notNull(),
   iv: text("iv").notNull(),
   tag: text("tag").notNull(),
+  customEmailTemplate: text("custom_email_template"),
+  recoveryStrategy: text("recovery_strategy").default("oracle").notNull(),
+  businessName: text("business_name"),
+  supportEmail: text("support_email"),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
@@ -28,6 +32,8 @@ export const ghostTargets = pgTable("ghost_targets", {
   invoiceId: text("invoice_id").notNull(),
   discoveredAt: timestamp("discovered_at").defaultNow().notNull(),
   purgeAt: timestamp("purge_at").notNull(),
+  lastEmailedAt: timestamp("last_emailed_at"),
+  emailCount: integer("email_count").default(0).notNull(),
 });
 
 export const insertGhostTargetSchema = createInsertSchema(ghostTargets).omit({
