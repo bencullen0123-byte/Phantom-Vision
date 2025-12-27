@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { encrypt, selfTest } from "./utils/crypto";
 import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
+import { handleWebhookEvent } from "./services/webhookHandler";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
@@ -339,6 +340,113 @@ export async function registerRoutes(
       return res.status(500).json({
         status: "error",
         message: "Pulse processing failed",
+        error: error.message
+      });
+    }
+  });
+
+  // Stripe Webhook endpoint - receives payment events
+  app.post("/api/webhooks/stripe", async (req: Request, res: Response) => {
+    console.log("[WEBHOOK] Received Stripe webhook");
+
+    const stripe = getStripeClient();
+    if (!stripe) {
+      console.error("[WEBHOOK] Stripe client unavailable");
+      return res.status(500).json({ error: "Stripe not configured" });
+    }
+
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error("[WEBHOOK] STRIPE_WEBHOOK_SECRET not configured");
+      return res.status(500).json({ error: "Webhook secret not configured" });
+    }
+
+    const signature = req.headers["stripe-signature"];
+    if (!signature) {
+      console.error("[WEBHOOK] Missing stripe-signature header");
+      return res.status(400).json({ error: "Missing signature" });
+    }
+
+    let event: Stripe.Event;
+
+    try {
+      const rawBody = req.rawBody as Buffer;
+      if (!rawBody) {
+        console.error("[WEBHOOK] Raw body not available");
+        return res.status(400).json({ error: "Raw body not available" });
+      }
+
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        webhookSecret
+      );
+    } catch (err: any) {
+      console.error("[WEBHOOK] Signature verification failed:", err.message);
+      return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
+    }
+
+    try {
+      const result = await handleWebhookEvent(event);
+      
+      return res.json({
+        received: true,
+        ...result
+      });
+    } catch (error: any) {
+      console.error("[WEBHOOK] Event processing failed:", error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Merchant Stats API - returns recovery dashboard data
+  app.get("/api/merchant/stats", async (req: Request, res: Response) => {
+    const { merchant_id } = req.query;
+
+    let targetMerchantId: string;
+
+    if (!merchant_id || typeof merchant_id !== "string") {
+      const merchants = await storage.getAllMerchants();
+      
+      if (merchants.length === 0) {
+        return res.status(400).json({
+          status: "error",
+          message: "No connected merchants found"
+        });
+      }
+
+      targetMerchantId = merchants[0].id;
+    } else {
+      targetMerchantId = merchant_id;
+    }
+
+    const merchant = await storage.getMerchant(targetMerchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        status: "error",
+        message: "Merchant not found"
+      });
+    }
+
+    try {
+      const stats = await storage.getMerchantStats(targetMerchantId);
+
+      return res.json({
+        status: "success",
+        merchant_id: merchant.stripeUserId,
+        total_ghosts_found: stats.totalGhostsFound,
+        active_ghosts: stats.activeGhosts,
+        recovered_count: stats.recoveredCount,
+        revenue_recovered_cents: stats.totalRecoveredCents,
+        revenue_recovered_formatted: `$${(stats.totalRecoveredCents / 100).toFixed(2)}`,
+        recovery_rate: stats.recoveryRate,
+        recovery_rate_formatted: `${stats.recoveryRate.toFixed(2)}%`
+      });
+    } catch (error: any) {
+      console.error("[STATS] Failed to get merchant stats:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve stats",
         error: error.message
       });
     }
