@@ -2,13 +2,14 @@
 
 ## Overview
 
-PHANTOM is a revenue intelligence platform designed to identify "Ghost Users"—customers who retain active SaaS access despite failed payments—and execute recovery operations. The application is currently in Stage 1 ("The Titanium Gate"), focused on building a secure, headless backend capable of handling merchant identities and encryption through Stripe Connect OAuth integration.
+PHANTOM is a revenue intelligence platform designed to identify "Ghost Users"—customers who retain active SaaS access despite failed payments—and execute recovery operations. The application is a fully autonomous, headless backend capable of handling merchant identities, encryption, ghost detection, recovery email orchestration, and payment tracking.
 
 The project follows a staged development approach:
 - **Stage 1:** Foundation & Security (complete) - OAuth, encryption vault, secure data storage
 - **Stage 2:** Ghost Hunter (complete) - Historical audit & forensic data extraction
 - **Stage 3:** The Pulse (complete) - Recovery email orchestration via Resend with Oracle timing
-- **Stage 4:** Oracle & Enforcement - Aggregated data moat & access shield API
+- **Stage 4:** The Handshake (complete) - Webhook infrastructure tracking successful recoveries
+- **Stage 5:** The Sentinel (complete) - Autonomous operation with scheduled jobs and health monitoring
 
 ## User Preferences
 
@@ -42,9 +43,10 @@ Preferred communication style: Simple, everyday language.
 - **Database:** PostgreSQL via Drizzle ORM
 - **Schema Location:** `shared/schema.ts`
 - **Tables:**
-  - `merchants` - Encrypted Stripe access tokens with IV and auth tag
-  - `ghost_targets` - Transient PII (email, amount) with 90-day purge timestamp
+  - `merchants` - Encrypted Stripe access tokens with IV, auth tag, and totalRecoveredCents
+  - `ghost_targets` - Transient PII (email, amount), status (pending/recovered/exhausted), 90-day purge timestamp, unique invoiceId
   - `liquidity_oracle` - Anonymized metadata (business category, timing data)
+  - `system_logs` - Heartbeat job monitoring (job name, status, details, error messages)
 
 ### Authentication Flow
 - **OAuth Provider:** Stripe Connect
@@ -87,3 +89,15 @@ shared/          # Shared types and schema
 - `ENCRYPTION_KEY` - Master encryption key (32+ characters)
 - `STRIPE_CLIENT_ID` - Stripe Connect application ID
 - `STRIPE_SECRET_KEY` - Stripe API secret key
+- `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret for payment confirmation
+
+### The Sentinel (Autonomous Scheduler)
+- **Ghost Hunter:** Runs every 12 hours at minute 0
+- **Pulse Engine:** Runs every hour at minute 0
+- **Defensive Rules:**
+  - 4-hour grace period before emailing new ghosts
+  - Max 3 emails per ghost (then marked as "exhausted")
+- **Health Endpoints:**
+  - `GET /api/system/health` - View scheduler status and logs
+  - `POST /api/sentinel/ghost-hunter` - Manual trigger
+  - `POST /api/sentinel/pulse-engine` - Manual trigger
