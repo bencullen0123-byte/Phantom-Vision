@@ -2,6 +2,14 @@ import { merchants, ghostTargets, liquidityOracle, type Merchant, type InsertMer
 import { db } from "./db";
 import { eq, count, isNull, and, sql, desc } from "drizzle-orm";
 
+export interface MerchantStats {
+  totalGhostsFound: number;
+  activeGhosts: number;
+  recoveredCount: number;
+  totalRecoveredCents: number;
+  recoveryRate: number;
+}
+
 export interface IStorage {
   // Merchants
   getMerchant(id: string): Promise<Merchant | undefined>;
@@ -9,6 +17,8 @@ export interface IStorage {
   createMerchant(merchant: InsertMerchant): Promise<Merchant>;
   getAllMerchants(): Promise<Merchant[]>;
   updateMerchant(id: string, updates: Partial<InsertMerchant>): Promise<Merchant | undefined>;
+  incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>;
+  getMerchantStats(merchantId: string): Promise<MerchantStats>;
   
   // Ghost Targets
   getGhostTarget(id: string): Promise<GhostTarget | undefined>;
@@ -18,6 +28,9 @@ export interface IStorage {
   getGhostByInvoiceId(invoiceId: string): Promise<GhostTarget | undefined>;
   getUnprocessedGhosts(): Promise<GhostTarget[]>;
   updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined>;
+  markGhostRecovered(id: string): Promise<GhostTarget | undefined>;
+  countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
+  countActiveGhostsByMerchant(merchantId: string): Promise<number>;
   
   // Liquidity Oracle
   getLiquidityOracleEntry(id: string): Promise<LiquidityOracle | undefined>;
@@ -57,6 +70,36 @@ export class DatabaseStorage implements IStorage {
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined> {
+    const [updated] = await db
+      .update(merchants)
+      .set({
+        totalRecoveredCents: sql`${merchants.totalRecoveredCents} + ${amountCents}`,
+      })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getMerchantStats(merchantId: string): Promise<MerchantStats> {
+    const totalGhosts = await this.countGhostsByMerchant(merchantId);
+    const activeGhosts = await this.countActiveGhostsByMerchant(merchantId);
+    const recoveredCount = await this.countRecoveredGhostsByMerchant(merchantId);
+    
+    const merchant = await this.getMerchant(merchantId);
+    const totalRecoveredCents = merchant?.totalRecoveredCents || 0;
+    
+    const recoveryRate = totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0;
+    
+    return {
+      totalGhostsFound: totalGhosts,
+      activeGhosts,
+      recoveredCount,
+      totalRecoveredCents,
+      recoveryRate: Math.round(recoveryRate * 100) / 100,
+    };
   }
 
   // Ghost Targets
@@ -111,6 +154,40 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async markGhostRecovered(id: string): Promise<GhostTarget | undefined> {
+    const [updated] = await db
+      .update(ghostTargets)
+      .set({
+        status: "recovered",
+        recoveredAt: new Date(),
+      })
+      .where(eq(ghostTargets.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async countRecoveredGhostsByMerchant(merchantId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(ghostTargets)
+      .where(and(
+        eq(ghostTargets.merchantId, merchantId),
+        eq(ghostTargets.status, "recovered")
+      ));
+    return result?.count || 0;
+  }
+
+  async countActiveGhostsByMerchant(merchantId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(ghostTargets)
+      .where(and(
+        eq(ghostTargets.merchantId, merchantId),
+        eq(ghostTargets.status, "pending")
+      ));
+    return result?.count || 0;
   }
 
   // Liquidity Oracle
