@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ export const merchants = pgTable("merchants", {
   recoveryStrategy: text("recovery_strategy").default("oracle").notNull(),
   businessName: text("business_name"),
   supportEmail: text("support_email"),
+  totalRecoveredCents: bigint("total_recovered_cents", { mode: "number" }).default(0).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
@@ -34,6 +35,8 @@ export const ghostTargets = pgTable("ghost_targets", {
   purgeAt: timestamp("purge_at").notNull(),
   lastEmailedAt: timestamp("last_emailed_at"),
   emailCount: integer("email_count").default(0).notNull(),
+  status: text("status").default("pending").notNull(),
+  recoveredAt: timestamp("recovered_at"),
 });
 
 export const insertGhostTargetSchema = createInsertSchema(ghostTargets).omit({
