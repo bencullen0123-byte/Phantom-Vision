@@ -1,0 +1,173 @@
+// Pulse Engine - Orchestrates recovery email timing using Oracle data
+import { storage } from "../storage";
+import { sendRecoveryEmail } from "./pulseMailer";
+import type { GhostTarget, Merchant } from "@shared/schema";
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+interface GoldenHour {
+  dayOfWeek: number;
+  hourOfDay: number;
+  frequency: number;
+}
+
+interface ProcessQueueResult {
+  emailsSent: number;
+  emailsFailed: number;
+  ghostsProcessed: number;
+  nextGoldenHour: string | null;
+  errors: string[];
+}
+
+function isWithinGoldenHour(goldenHour: GoldenHour | null): boolean {
+  if (!goldenHour) {
+    return true;
+  }
+  
+  const now = new Date();
+  const currentDay = now.getUTCDay();
+  const currentHour = now.getUTCHours();
+  
+  const isGoldenDay = currentDay === goldenHour.dayOfWeek;
+  const hourBuffer = 2;
+  const isNearGoldenHour = 
+    currentHour >= goldenHour.hourOfDay - hourBuffer && 
+    currentHour <= goldenHour.hourOfDay + hourBuffer;
+  
+  return isGoldenDay && isNearGoldenHour;
+}
+
+function getNextGoldenHourWindow(goldenHour: GoldenHour | null): string | null {
+  if (!goldenHour) {
+    return null;
+  }
+  
+  const now = new Date();
+  const currentDay = now.getUTCDay();
+  const currentHour = now.getUTCHours();
+  
+  let daysUntil = goldenHour.dayOfWeek - currentDay;
+  if (daysUntil < 0) {
+    daysUntil += 7;
+  } else if (daysUntil === 0 && currentHour > goldenHour.hourOfDay + 2) {
+    daysUntil = 7;
+  }
+  
+  const nextDate = new Date(now);
+  nextDate.setUTCDate(nextDate.getUTCDate() + daysUntil);
+  nextDate.setUTCHours(goldenHour.hourOfDay, 0, 0, 0);
+  
+  const dayName = DAY_NAMES[goldenHour.dayOfWeek];
+  const hourFormatted = goldenHour.hourOfDay.toString().padStart(2, '0') + ':00 UTC';
+  
+  return `${dayName} at ${hourFormatted} (${nextDate.toISOString()})`;
+}
+
+function buildInvoiceUrl(invoiceId: string): string {
+  return `https://invoice.stripe.com/i/${invoiceId}`;
+}
+
+async function processGhostWithMerchant(
+  ghost: GhostTarget, 
+  merchant: Merchant,
+  goldenHour: GoldenHour | null
+): Promise<{ sent: boolean; error?: string }> {
+  
+  if (merchant.recoveryStrategy === 'oracle' && goldenHour) {
+    if (!isWithinGoldenHour(goldenHour)) {
+      return { sent: false, error: 'Outside golden hour window' };
+    }
+  }
+  
+  const invoiceUrl = buildInvoiceUrl(ghost.invoiceId);
+  
+  const result = await sendRecoveryEmail(
+    ghost.email,
+    ghost.amount,
+    invoiceUrl,
+    merchant
+  );
+  
+  if (result.success) {
+    await storage.updateGhostEmailStatus(ghost.id);
+    return { sent: true };
+  }
+  
+  return { sent: false, error: result.error };
+}
+
+export async function processQueue(): Promise<ProcessQueueResult> {
+  console.log("[PULSE ENGINE] Starting queue processing...");
+  
+  const result: ProcessQueueResult = {
+    emailsSent: 0,
+    emailsFailed: 0,
+    ghostsProcessed: 0,
+    nextGoldenHour: null,
+    errors: []
+  };
+  
+  try {
+    const unprocessedGhosts = await storage.getUnprocessedGhosts();
+    console.log(`[PULSE ENGINE] Found ${unprocessedGhosts.length} unprocessed ghosts`);
+    
+    if (unprocessedGhosts.length === 0) {
+      result.nextGoldenHour = "No ghosts to process";
+      return result;
+    }
+    
+    const merchantCache = new Map<string, Merchant>();
+    const goldenHourCache = new Map<string, GoldenHour | null>();
+    
+    for (const ghost of unprocessedGhosts) {
+      result.ghostsProcessed++;
+      
+      let merchant = merchantCache.get(ghost.merchantId);
+      if (!merchant) {
+        const fetched = await storage.getMerchant(ghost.merchantId);
+        if (!fetched) {
+          result.errors.push(`Merchant not found for ghost ${ghost.id}`);
+          result.emailsFailed++;
+          continue;
+        }
+        merchant = fetched;
+        merchantCache.set(ghost.merchantId, merchant);
+      }
+      
+      let goldenHour = goldenHourCache.get(ghost.merchantId);
+      if (goldenHour === undefined) {
+        goldenHour = await storage.getGoldenHour(ghost.merchantId);
+        goldenHourCache.set(ghost.merchantId, goldenHour);
+      }
+      
+      if (!result.nextGoldenHour && goldenHour) {
+        result.nextGoldenHour = getNextGoldenHourWindow(goldenHour);
+      }
+      
+      const processResult = await processGhostWithMerchant(ghost, merchant, goldenHour);
+      
+      if (processResult.sent) {
+        result.emailsSent++;
+      } else {
+        if (processResult.error !== 'Outside golden hour window') {
+          result.emailsFailed++;
+          if (processResult.error) {
+            result.errors.push(`Ghost ${ghost.id}: ${processResult.error}`);
+          }
+        }
+      }
+    }
+    
+    if (!result.nextGoldenHour) {
+      result.nextGoldenHour = "No oracle data available - using immediate timing";
+    }
+    
+    console.log(`[PULSE ENGINE] Queue processing complete. Sent: ${result.emailsSent}, Failed: ${result.emailsFailed}`);
+    
+  } catch (error: any) {
+    console.error("[PULSE ENGINE] Queue processing failed:", error);
+    result.errors.push(`Queue processing error: ${error.message}`);
+  }
+  
+  return result;
+}

@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { encrypt, selfTest } from "./utils/crypto";
 import { runAuditForMerchant } from "./services/ghostHunter";
+import { processQueue } from "./services/pulseEngine";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
@@ -313,6 +314,31 @@ export async function registerRoutes(
       return res.status(500).json({
         status: "error",
         message: "Audit scan failed",
+        error: error.message
+      });
+    }
+  });
+
+  // Pulse endpoint - triggers recovery email queue processing
+  app.get("/api/pulse/run", async (_req: Request, res: Response) => {
+    console.log("[PULSE] Manual trigger initiated");
+
+    try {
+      const result = await processQueue();
+
+      return res.json({
+        status: "success",
+        emails_sent: result.emailsSent,
+        emails_failed: result.emailsFailed,
+        ghosts_processed: result.ghostsProcessed,
+        next_golden_hour: result.nextGoldenHour,
+        errors: result.errors
+      });
+    } catch (error: any) {
+      console.error("[PULSE] Queue processing failed:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Pulse processing failed",
         error: error.message
       });
     }
