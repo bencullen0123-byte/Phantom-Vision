@@ -143,37 +143,40 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
             const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
 
             if (hasActiveSub) {
-              const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
-              
-              if (!existingGhost) {
-                const email = invoice.customer_email || "unknown";
-                const amount = invoice.amount_due || 0;
+              const email = invoice.customer_email || "unknown";
+              const amount = invoice.amount_due || 0;
 
-                const purgeAt = new Date();
-                purgeAt.setDate(purgeAt.getDate() + 90);
+              const purgeAt = new Date();
+              purgeAt.setDate(purgeAt.getDate() + 90);
 
-                await storage.createGhostTarget({
-                  merchantId,
-                  email,
-                  amount,
-                  invoiceId: invoice.id,
-                  purgeAt,
-                });
+              const ghost = await storage.upsertGhostTarget({
+                merchantId,
+                email,
+                amount,
+                invoiceId: invoice.id,
+                purgeAt,
+                status: "pending",
+              });
 
-                result.ghostsFound.push({
-                  email,
-                  amount,
-                  invoiceId: invoice.id,
-                  customerId,
-                });
+              result.ghostsFound.push({
+                email,
+                amount,
+                invoiceId: invoice.id,
+                customerId,
+              });
 
-                result.totalRevenueAtRisk += amount;
+              result.totalRevenueAtRisk += amount;
 
-                console.log(`[GHOST HUNTER] Ghost found: ${email}, amount: ${amount / 100}`);
-              }
+              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: ${amount / 100}`);
             }
           }
         } else if (invoice.status === "paid") {
+          const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
+          if (existingGhost && existingGhost.status === "pending") {
+            await storage.markGhostRecovered(existingGhost.id);
+            await storage.incrementMerchantRecovery(merchantId, existingGhost.amount);
+            console.log(`[GHOST HUNTER] Backup recovery detected for invoice ${invoice.id}`);
+          }
           const timingData = extractPaymentTimingData(invoice);
           if (timingData) {
             await storage.createLiquidityOracleEntry({

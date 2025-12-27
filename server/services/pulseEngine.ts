@@ -108,18 +108,18 @@ export async function processQueue(): Promise<ProcessQueueResult> {
   };
   
   try {
-    const unprocessedGhosts = await storage.getUnprocessedGhosts();
-    console.log(`[PULSE ENGINE] Found ${unprocessedGhosts.length} unprocessed ghosts`);
+    const eligibleGhosts = await storage.getEligibleGhostsForEmail();
+    console.log(`[PULSE ENGINE] Found ${eligibleGhosts.length} eligible ghosts (pending, <3 emails, >4h grace)`);
     
-    if (unprocessedGhosts.length === 0) {
-      result.nextGoldenHour = "No ghosts to process";
+    if (eligibleGhosts.length === 0) {
+      result.nextGoldenHour = "No eligible ghosts to process";
       return result;
     }
     
     const merchantCache = new Map<string, Merchant>();
     const goldenHourCache = new Map<string, GoldenHour | null>();
     
-    for (const ghost of unprocessedGhosts) {
+    for (const ghost of eligibleGhosts) {
       result.ghostsProcessed++;
       
       let merchant = merchantCache.get(ghost.merchantId);
@@ -148,6 +148,12 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       
       if (processResult.sent) {
         result.emailsSent++;
+        
+        const newEmailCount = ghost.emailCount + 1;
+        if (newEmailCount >= 3) {
+          await storage.markGhostExhausted(ghost.id);
+          console.log(`[PULSE ENGINE] Ghost ${ghost.id} exhausted after 3 emails`);
+        }
       } else {
         if (processResult.error !== 'Outside golden hour window') {
           result.emailsFailed++;
