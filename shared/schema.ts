@@ -87,3 +87,12 @@ export const insertSystemLogSchema = createInsertSchema(systemLogs).omit({
 
 export type InsertSystemLog = z.infer<typeof insertSystemLogSchema>;
 export type SystemLog = typeof systemLogs.$inferSelect;
+
+// Cron locks table - industrial-grade job locking to prevent overlaps
+export const cronLocks = pgTable("cron_locks", {
+  jobName: text("job_name").primaryKey(),
+  holderId: text("holder_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type CronLock = typeof cronLocks.$inferSelect;
