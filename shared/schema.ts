@@ -19,6 +19,8 @@ export const merchants = pgTable("merchants", {
   allTimeLeakedCents: bigint("all_time_leaked_cents", { mode: "number" }).default(0).notNull(),
   totalGhostCount: integer("total_ghost_count").default(0).notNull(),
   lastAuditAt: timestamp("last_audit_at"),
+  // Tiered Capacity Gating: max pending ghosts allowed per subscription tier
+  tierLimit: integer("tier_limit").default(50).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
