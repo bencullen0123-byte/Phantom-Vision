@@ -95,7 +95,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
     errors: [],
   };
 
-  console.log(`[GHOST HUNTER] Starting scan for merchant: ${merchantId}`);
+  console.log(`[GHOST HUNTER] Starting DEEP HARVEST scan for merchant: ${merchantId}`);
 
   const merchant = await storage.getMerchant(merchantId);
   if (!merchant) {
@@ -115,22 +115,29 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
 
   let hasMore = true;
   let startingAfter: string | undefined;
-  let invoicesFetched = 0;
-  const maxInvoices = 100;
+  let totalInvoicesScanned = 0;
+  let batchNumber = 0;
 
-  while (hasMore && invoicesFetched < maxInvoices) {
+  // Recursive cursor-based pagination - no invoice limit
+  while (hasMore) {
+    batchNumber++;
+    
     try {
       const params: Stripe.InvoiceListParams = {
-        limit: 25,
+        limit: 100, // Maximum allowed by Stripe API
       };
       if (startingAfter) {
         params.starting_after = startingAfter;
       }
 
       const invoices = await withRetry(() => stripe.invoices.list(params));
+      const batchSize = invoices.data.length;
+      
+      console.log(`[GHOST HUNTER] Processing batch ${batchNumber}: ${batchSize} invoices (cursor: ${startingAfter || 'start'})`);
 
+      // Process each invoice in this batch immediately (memory-safe)
       for (const invoice of invoices.data) {
-        invoicesFetched++;
+        totalInvoicesScanned++;
 
         if (invoice.status === "open" || invoice.status === "uncollectible") {
           const customerId = typeof invoice.customer === "string" 
@@ -140,6 +147,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
           if (customerId) {
             await delay(RATE_LIMIT_DELAY_MS);
             
+            // Dead Ghost Filter: only process if customer has active/past_due subscription
             const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
 
             if (hasActiveSub) {
@@ -149,7 +157,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
-              const ghost = await storage.upsertGhostTarget({
+              // UPSERT on invoiceId prevents duplicates
+              await storage.upsertGhostTarget({
                 merchantId,
                 email,
                 amount,
@@ -167,16 +176,19 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
 
               result.totalRevenueAtRisk += amount;
 
-              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: ${amount / 100}`);
+              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}`);
             }
           }
         } else if (invoice.status === "paid") {
+          // Backup recovery detection
           const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
           if (existingGhost && existingGhost.status === "pending") {
             await storage.markGhostRecovered(existingGhost.id);
             await storage.incrementMerchantRecovery(merchantId, existingGhost.amount);
             console.log(`[GHOST HUNTER] Backup recovery detected for invoice ${invoice.id}`);
           }
+          
+          // Extract Oracle timing data from paid invoices
           const timingData = extractPaymentTimingData(invoice);
           if (timingData) {
             await storage.createLiquidityOracleEntry({
@@ -188,26 +200,32 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
             result.oracleDataPoints++;
           }
         }
-
-        if (invoicesFetched >= maxInvoices) {
-          break;
-        }
       }
+      // Batch processed - memory released for this batch
 
-      hasMore = invoices.has_more && invoicesFetched < maxInvoices;
+      // Update cursor for next page
+      hasMore = invoices.has_more;
       if (hasMore && invoices.data.length > 0) {
         startingAfter = invoices.data[invoices.data.length - 1].id;
-        await delay(RATE_LIMIT_DELAY_MS);
+        await delay(RATE_LIMIT_DELAY_MS); // Rate limit between pagination calls
       }
 
     } catch (error: any) {
-      result.errors.push(`Failed to fetch invoices: ${error.message}`);
-      console.error("[GHOST HUNTER] Invoice fetch error:", error);
+      result.errors.push(`Failed to fetch invoices at batch ${batchNumber}: ${error.message}`);
+      console.error(`[GHOST HUNTER] Invoice fetch error at batch ${batchNumber}:`, error);
       break;
     }
   }
 
-  console.log(`[GHOST HUNTER] Scan complete. Ghosts: ${result.ghostsFound.length}, Oracle points: ${result.oracleDataPoints}`);
+  // Summary logging
+  console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
+  console.log(`[GHOST HUNTER] DEEP HARVEST COMPLETE for merchant: ${merchantId}`);
+  console.log(`[GHOST HUNTER] Total invoices scanned: ${totalInvoicesScanned}`);
+  console.log(`[GHOST HUNTER] Total batches processed: ${batchNumber}`);
+  console.log(`[GHOST HUNTER] Ghosts found: ${result.ghostsFound.length}`);
+  console.log(`[GHOST HUNTER] Revenue at risk: $${(result.totalRevenueAtRisk / 100).toFixed(2)}`);
+  console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
+  console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
 
   return result;
 }
