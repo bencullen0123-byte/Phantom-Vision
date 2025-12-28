@@ -7,6 +7,46 @@ const RATE_LIMIT_DELAY_MS = 100;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
+// Intelligent Decline Branching: Categorize Stripe decline codes
+// Soft codes: temporary issues that may resolve (retry-friendly)
+const SOFT_CODES = new Set([
+  "insufficient_funds",
+  "card_velocity_exceeded",
+  "try_again_later",
+  "processing_error",
+  "reenter_transaction",
+  "do_not_honor", // Often temporary
+]);
+
+// Hard codes: permanent issues requiring customer card update
+const HARD_CODES = new Set([
+  "expired_card",
+  "lost_card",
+  "stolen_card",
+  "incorrect_number",
+  "invalid_cvc",
+  "card_not_supported",
+  "card_declined", // Generic decline, treat as hard
+  "pickup_card",
+]);
+
+function categorizeDeclineCode(code: string | null | undefined): { declineType: 'soft' | 'hard' | null; failureReason: string | null } {
+  if (!code) {
+    return { declineType: null, failureReason: null };
+  }
+  
+  if (SOFT_CODES.has(code)) {
+    return { declineType: 'soft', failureReason: code };
+  }
+  
+  if (HARD_CODES.has(code)) {
+    return { declineType: 'hard', failureReason: code };
+  }
+  
+  // Unknown codes default to soft (more conservative approach)
+  return { declineType: 'soft', failureReason: code };
+}
+
 interface GhostResult {
   email: string;
   customerName: string;
@@ -168,6 +208,11 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
               }
               const amount = invoice.amount_due || 0;
 
+              // Intelligent Decline Branching: Extract decline code from last payment error
+              const lastPaymentError = (invoice as any).last_payment_error;
+              const declineCode = lastPaymentError?.decline_code || null;
+              const { declineType, failureReason } = categorizeDeclineCode(declineCode);
+
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
@@ -180,6 +225,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
                 invoiceId: invoice.id,
                 purgeAt,
                 status: "pending",
+                failureReason,
+                declineType,
               });
 
               result.ghostsFound.push({
@@ -203,7 +250,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
           // Backup recovery detection
           const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
           if (existingGhost && existingGhost.status === "pending") {
-            await storage.markGhostRecovered(existingGhost.id);
+            // Backup recovery is always organic (discovered during scan, not via PHANTOM email)
+            await storage.markGhostRecovered(existingGhost.id, 'organic');
             await storage.incrementMerchantRecovery(merchantId, existingGhost.amount);
             console.log(`[GHOST HUNTER] Backup recovery detected for invoice ${invoice.id}`);
           }
