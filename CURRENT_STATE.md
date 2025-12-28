@@ -41,6 +41,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] Filter out "Dead Ghosts" (canceled subscriptions)
 - [x] UPSERT logic on unique invoiceId (prevents duplicates)
 - [x] Backup recovery detection (marks paid invoices during scans)
+- [x] **Recursive All-Time Pagination** (Deep Harvest mode - no invoice limit)
 
 ### Stage 3: The Pulse (Email Orchestration)
 - [x] Recovery email templates via Resend
@@ -191,9 +192,15 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 | `RATE_LIMIT_DELAY_MS` | `100` ms | Delay between Stripe API calls |
 | `MAX_RETRIES` | `3` | Retry attempts on 429 rate limit |
 | `INITIAL_BACKOFF_MS` | `1000` ms | Initial exponential backoff |
-| `maxInvoices` | `100` | Maximum invoices scanned per merchant per run |
-| `limit` (per API call) | `25` | Invoices fetched per Stripe API request |
+| `limit` (per API call) | `100` | Invoices fetched per Stripe API request (maximum allowed) |
 | `subscriptions.limit` | `10` | Subscriptions checked per customer |
+
+**Pagination Mode: RECURSIVE (Deep Harvest)**
+- No invoice limit - scans ALL invoices in merchant's Stripe history
+- Uses `starting_after` cursor for pagination
+- Processes each batch of 100 invoices in-loop (memory-safe)
+- Batches discarded after database UPSERT completes
+- Continues while `has_more: true` from Stripe API
 
 #### Defensive Rules (`pulseEngine.ts` + `storage.ts`)
 
@@ -406,4 +413,4 @@ interface IStorage {
 
 ---
 
-*Last Updated: December 27, 2025*
+*Last Updated: December 28, 2025*
