@@ -1,4 +1,4 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, sql, desc, lt, ne } from "drizzle-orm";
 
@@ -51,6 +51,10 @@ export interface IStorage {
   // System Logs
   createSystemLog(log: InsertSystemLog): Promise<SystemLog>;
   getRecentSystemLogs(limit: number): Promise<SystemLog[]>;
+  
+  // Cron Locks (Atomic Job Locking)
+  acquireJobLock(jobName: string, ttlMinutes: number): Promise<{ holderId: string; wasStolen: boolean } | null>;
+  releaseJobLock(jobName: string, holderId: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -314,6 +318,54 @@ export class DatabaseStorage implements IStorage {
       .from(systemLogs)
       .orderBy(desc(systemLogs.runAt))
       .limit(limit);
+  }
+
+  // Cron Locks (Atomic Job Locking)
+  async acquireJobLock(jobName: string, ttlMinutes: number): Promise<{ holderId: string; wasStolen: boolean } | null> {
+    const holderId = crypto.randomUUID();
+    const now = new Date();
+    const ttlThreshold = new Date(now.getTime() - ttlMinutes * 60 * 1000);
+    
+    // Atomic UPSERT: Insert lock, or steal if existing lock is stale (older than TTL)
+    // This prevents the "check-then-set" race condition
+    const result = await db.execute(sql`
+      INSERT INTO cron_locks (job_name, holder_id, created_at)
+      VALUES (${jobName}, ${holderId}, ${now})
+      ON CONFLICT (job_name) DO UPDATE
+      SET holder_id = ${holderId},
+          created_at = ${now}
+      WHERE cron_locks.created_at < ${ttlThreshold}
+      RETURNING holder_id, 
+        CASE WHEN cron_locks.holder_id != ${holderId} THEN true ELSE false END as was_stolen
+    `);
+    
+    // If no rows returned, the lock is held by a healthy (non-expired) process
+    if (!result.rows || result.rows.length === 0) {
+      return null;
+    }
+    
+    const row = result.rows[0] as { holder_id: string; was_stolen: boolean };
+    
+    // Verify we actually got the lock (our holderId matches)
+    if (row.holder_id === holderId) {
+      return { holderId, wasStolen: row.was_stolen };
+    }
+    
+    return null;
+  }
+
+  async releaseJobLock(jobName: string, holderId: string): Promise<boolean> {
+    // Identity-safe release: only delete if BOTH jobName AND holderId match
+    // Prevents zombie jobs from accidentally deleting locks they no longer own
+    const result = await db
+      .delete(cronLocks)
+      .where(and(
+        eq(cronLocks.jobName, jobName),
+        eq(cronLocks.holderId, holderId)
+      ))
+      .returning();
+    
+    return result.length > 0;
   }
 }
 
