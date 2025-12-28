@@ -55,6 +55,8 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     recoveredAt: dbRecord.recoveredAt,
     attributionExpiresAt: dbRecord.attributionExpiresAt,
     recoveryType: dbRecord.recoveryType,
+    failureReason: dbRecord.failureReason,
+    declineType: dbRecord.declineType,
   };
 }
 
@@ -76,6 +78,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   emailCount?: number;
   status?: string;
   recoveredAt?: Date | null;
+  failureReason?: string | null;
+  declineType?: string | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -95,6 +99,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     emailCount: target.emailCount,
     status: target.status,
     recoveredAt: target.recoveredAt,
+    failureReason: target.failureReason,
+    declineType: target.declineType,
   };
 }
 

@@ -54,6 +54,10 @@ export const ghostTargets = pgTable("ghost_targets", {
   attributionExpiresAt: timestamp("attribution_expires_at"),
   // Recovery type: 'direct' (PHANTOM-attributed) or 'organic' (independent payment)
   recoveryType: text("recovery_type"),
+  // Intelligent Decline Branching: raw Stripe decline code
+  failureReason: text("failure_reason"),
+  // Decline type: 'soft' (retriable) or 'hard' (requires card update)
+  declineType: text("decline_type"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -78,6 +82,8 @@ export interface InsertGhostTarget {
   recoveredAt?: Date | null;
   attributionExpiresAt?: Date | null;
   recoveryType?: string | null;
+  failureReason?: string | null;
+  declineType?: string | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -96,6 +102,8 @@ export interface GhostTarget {
   recoveredAt: Date | null;
   attributionExpiresAt: Date | null;
   recoveryType: string | null;
+  failureReason: string | null;
+  declineType: string | null;
 }
 
 // Raw database type (encrypted fields)
