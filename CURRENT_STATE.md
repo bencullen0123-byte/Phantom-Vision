@@ -94,16 +94,18 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/health` | Basic health check |
 | GET | `/api/auth/stripe` | Initiate Stripe OAuth |
 | GET | `/api/auth/callback` | Handle OAuth callback |
-| GET | `/api/merchants/:id` | Get merchant details |
-| GET | `/api/merchants/:id/stats` | Get recovery statistics |
-| POST | `/api/ghost-hunter/:merchantId` | Trigger ghost scan |
-| POST | `/api/pulse/:merchantId` | Trigger recovery emails |
+| GET | `/api/auth/success` | OAuth success redirect page |
+| GET | `/api/auth/error` | OAuth error redirect page |
+| GET | `/api/audit/run` | Trigger ghost scan (requires merchantId query param) |
+| GET | `/api/pulse/run` | Trigger recovery emails for all merchants |
 | POST | `/api/webhooks/stripe` | Stripe webhook receiver |
-| GET | `/api/system/health` | View scheduler status |
-| POST | `/api/sentinel/ghost-hunter` | Manual Ghost Hunter trigger |
-| POST | `/api/sentinel/pulse-engine` | Manual Pulse Engine trigger |
+| GET | `/api/merchant/stats` | Get merchant recovery statistics |
+| GET | `/api/system/health` | View scheduler status and logs |
+| POST | `/api/sentinel/ghost-hunter` | Manual Ghost Hunter trigger (all merchants) |
+| POST | `/api/sentinel/pulse-engine` | Manual Pulse Engine trigger (all merchants) |
 | GET | `/api/l/:strikeId` | Attribution proxy (sets 24h window, 302 redirect to Stripe) |
 
 ### Database Tables
@@ -180,7 +182,8 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 | `STRIPE_CLIENT_ID` | Stripe Connect app ID |
 | `STRIPE_SECRET_KEY` | Stripe API secret |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
-| `RESEND_API_KEY` | Email service API key |
+
+**Email Service:** Uses Replit's Resend connector integration (`REPLIT_CONNECTORS_HOSTNAME`) - no manual API key required.
 
 ---
 
