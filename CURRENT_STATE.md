@@ -167,8 +167,9 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 │   └── schema.ts              # Drizzle schema + Zod validators
 │
 ├── replit.md                  # Project documentation
+├── CURRENT_STATE.md           # System state & technical manifest
 ├── design_guidelines.md       # UI/UX design system
-└── ACTIVE_SPEC.md             # Feature specifications (empty)
+└── ACTIVE_SPEC.md             # Feature specifications
 ```
 
 ---
