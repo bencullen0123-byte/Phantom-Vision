@@ -28,14 +28,16 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 
 ## Implemented Features
 
-### Stage 1: The Titanium Gate (Security Foundation)
+### Stage 1: The Titanium Gate (Security Foundation) âœ… HARDENED
 - [x] AES-256-GCM encryption vault with 12-byte IV generation
 - [x] Boot-time self-test validation (fails server if encryption broken)
 - [x] Master key validation (minimum 32 characters)
 - [x] Stripe Connect OAuth flow with CSRF state protection
 - [x] Encrypted token storage in database
+- [x] **Identity Encryption Wrapper** (email + customerName encrypted at rest)
+- [x] **Titanium Error Handling** (decryption failures return placeholder, not crash)
 
-### Stage 2: The Ghost Hunter (Forensic Audit)
+### Stage 2: The Ghost Hunter (Forensic Audit) âœ… HARDENED
 - [x] Scan merchant's Stripe account for unpaid invoices
 - [x] Cross-reference with active/past_due subscriptions
 - [x] Filter out "Dead Ghosts" (canceled subscriptions)
@@ -43,12 +45,16 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] Backup recovery detection (marks paid invoices during scans)
 - [x] **Recursive All-Time Pagination** (Deep Harvest mode - no invoice limit)
 - [x] **Shadow Revenue Calculator** (allTimeLeakedCents, totalGhostCount, lastAuditAt)
+- [x] **Customer Name Extraction** (from Stripe invoice with fallback chain)
 
-### Stage 3: The Pulse (Email Orchestration)
+### Stage 3: The Pulse (Email Orchestration) âœ… HARDENED
 - [x] Recovery email templates via Resend
 - [x] Oracle timing intelligence (Golden Hour strategy)
 - [x] 2-hour buffer around optimal send times
 - [x] Email tracking (strikes count, lastEmailedAt)
+- [x] **Personalized Greeting** (Hi [Name] using decrypted customerName)
+- [x] **PII-Safe Logging** (no plaintext email/name in logs - only anonymized identifiers)
+- [x] **Transient Decryption** (PII decrypted on-demand, no persistent caching)
 
 ### Stage 4: The Handshake (Webhook Infrastructure)
 - [x] Stripe webhook endpoint with signature verification
@@ -302,11 +308,13 @@ All PII is encrypted at rest using AES-256-GCM before database storage. The stor
 | `amount` | `integer` | **PLAINTEXT** | None (not PII) |
 | `invoiceId` | `text` | **PLAINTEXT** | None (Stripe reference) |
 
-**Security Model:**
+**Security Model: Encrypted at Rest with Transient Decryption-on-Demand**
 - All PII (email, customerName) encrypted before database insertion
 - Each encryption operation generates new 12-byte random IV (forward secrecy)
 - Titanium error handling: decryption failures return `ENCRYPTION_ERROR` placeholder instead of crashing
 - Storage layer encapsulates encryption (callers pass plaintext, storage encrypts/decrypts)
+- **Transient Decryption:** PII decrypted only when needed, never cached in memory or logs
+- **PII-Safe Logging:** All console.log statements use anonymized identifiers (merchantId, ghostId) - never plaintext PII
 - 90-day auto-purge (`purgeAt`) provides additional data minimization
 
 #### Customer Name Extraction (`ghostHunter.ts`)
