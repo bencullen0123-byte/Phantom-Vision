@@ -46,6 +46,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] **Recursive All-Time Pagination** (Deep Harvest mode - no invoice limit)
 - [x] **Shadow Revenue Calculator** (allTimeLeakedCents, totalGhostCount, lastAuditAt)
 - [x] **Customer Name Extraction** (from Stripe invoice with fallback chain)
+- [x] **Intelligent Decline Branching** (extracts decline_code, categorizes as soft/hard)
 
 ### Stage 3: The Pulse (Email Orchestration) âœ… HARDENED
 - [x] Recovery email templates via Resend
@@ -55,6 +56,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] **Personalized Greeting** (Hi [Name] using decrypted customerName)
 - [x] **PII-Safe Logging** (no plaintext email/name in logs - only anonymized identifiers)
 - [x] **Transient Decryption** (PII decrypted on-demand, no persistent caching)
+- [x] **Intelligent Decline Branching** (hard declines bypass Oracle timing + 4h grace period)
 
 ### Stage 4: The Handshake (Webhook Infrastructure) âœ… HARDENED
 - [x] Stripe webhook endpoint with signature verification
@@ -102,7 +104,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 | Table | Purpose |
 |-------|---------|
 | `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence |
-| `ghost_targets` | Encrypted PII (email, customerName), status (pending/recovered/exhausted), invoiceId, attributionExpiresAt |
+| `ghost_targets` | Encrypted PII (email, customerName), status, invoiceId, attributionExpiresAt, failureReason, declineType |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
 | `cron_locks` | Atomic job locking to prevent overlapping cron executions |
@@ -308,6 +310,26 @@ The Sentinel implements industrial-grade database-level locking to prevent overl
 | Setting | Value | Location |
 |---------|-------|----------|
 | `apiVersion` | `"2025-12-15.clover"` | `ghostHunter.ts:48` |
+
+#### Intelligent Decline Branching (`ghostHunter.ts` + `pulseEngine.ts`)
+
+PHANTOM categorizes Stripe decline codes to branch recovery strategy:
+
+| Category | Decline Codes | Behavior |
+|----------|---------------|----------|
+| **Soft** | `insufficient_funds`, `card_velocity_exceeded`, `try_again_later`, `processing_error`, `reenter_transaction`, `do_not_honor` | Oracle timing + 4h grace period respected |
+| **Hard** | `expired_card`, `lost_card`, `stolen_card`, `incorrect_number`, `invalid_cvc`, `card_not_supported`, `card_declined`, `pickup_card` | **Immediate priority** - bypasses Oracle timing AND 4h grace period |
+
+**Implementation:**
+- Ghost Hunter extracts `last_payment_error.decline_code` from Stripe invoice
+- Stores `failureReason` (raw code) and `declineType` ('soft' | 'hard') per ghost
+- Pulse Engine checks `declineType` before applying timing restrictions
+- Storage layer's `getEligibleGhostsForEmail` uses OR condition to include hard declines immediately
+
+**Rationale:**
+- Hard declines (expired card, stolen card) require customer action to update payment method
+- Waiting for Oracle Golden Hour adds unnecessary delay for inevitable failures
+- Soft declines may resolve on retry (customer depositing funds), so timing optimization is valuable
 
 ---
 
