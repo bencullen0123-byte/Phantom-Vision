@@ -45,9 +45,13 @@ async function getUncachableResendClient() {
   };
 }
 
-function getDefaultEmailTemplate(businessName: string, amount: number, invoiceUrl: string): string {
+function getDefaultEmailTemplate(customerName: string, businessName: string, amount: number, invoiceUrl: string): string {
   const formattedAmount = `$${(amount / 100).toFixed(2)}`;
-  return `Hi,
+  // Use first name only for friendlier greeting, fallback to "there" if unknown
+  const greeting = customerName && customerName !== "Unknown Customer" && customerName !== "ENCRYPTION_ERROR"
+    ? customerName.split(' ')[0]
+    : "there";
+  return `Hi ${greeting},
 
 It looks like the latest payment of ${formattedAmount} for ${businessName} didn't go through.
 
@@ -59,12 +63,18 @@ Thanks!`;
 
 function parseCustomTemplate(
   template: string, 
+  customerName: string,
   businessName: string, 
   amount: number, 
   invoiceUrl: string
 ): string {
   const formattedAmount = `$${(amount / 100).toFixed(2)}`;
+  // Use first name only for [Name] placeholder, fallback to "there" if unknown
+  const greeting = customerName && customerName !== "Unknown Customer" && customerName !== "ENCRYPTION_ERROR"
+    ? customerName.split(' ')[0]
+    : "there";
   return template
+    .replace(/\[Name\]/g, greeting)
     .replace(/\[Business\]/g, businessName)
     .replace(/\[Amount\]/g, formattedAmount)
     .replace(/\[invoiceUrl\]/g, invoiceUrl);
@@ -78,11 +88,13 @@ export interface SendRecoveryEmailResult {
 
 export async function sendRecoveryEmail(
   to: string,
+  customerName: string,
   amount: number,
   invoiceUrl: string,
   merchant: Merchant
 ): Promise<SendRecoveryEmailResult> {
-  console.log(`[PULSE MAILER] Sending recovery email to ${to}`);
+  // SECURITY: Never log PII (email/customerName) - only log anonymized identifiers
+  console.log(`[PULSE MAILER] Sending recovery email for merchant ${merchant.id}`);
 
   try {
     const { client, fromEmail } = await getUncachableResendClient();
@@ -93,13 +105,14 @@ export async function sendRecoveryEmail(
     let emailContent: string;
     if (merchant.customEmailTemplate) {
       emailContent = parseCustomTemplate(
-        merchant.customEmailTemplate, 
+        merchant.customEmailTemplate,
+        customerName,
         businessName, 
         amount, 
         invoiceUrl
       );
     } else {
-      emailContent = getDefaultEmailTemplate(businessName, amount, invoiceUrl);
+      emailContent = getDefaultEmailTemplate(customerName, businessName, amount, invoiceUrl);
     }
 
     const result = await client.emails.send({

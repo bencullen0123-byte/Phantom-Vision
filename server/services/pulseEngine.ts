@@ -83,6 +83,7 @@ async function processGhostWithMerchant(
   
   const result = await sendRecoveryEmail(
     ghost.email,
+    ghost.customerName,
     ghost.amount,
     invoiceUrl,
     merchant
