@@ -502,6 +502,42 @@ export async function registerRoutes(
     }
   });
 
+  // Attribution Proxy Link - tracks clicks and redirects to Stripe invoice
+  // Sets 24-hour attribution window for payment tracking
+  app.get("/api/l/:strikeId", async (req: Request, res: Response) => {
+    const { strikeId } = req.params;
+    
+    // SECURITY: Log only anonymized identifier
+    console.log(`[ATTRIBUTION] Link click received for strike: ${strikeId}`);
+
+    try {
+      const ghost = await storage.getGhostTarget(strikeId);
+      
+      if (!ghost) {
+        console.warn(`[ATTRIBUTION] Invalid strike ID: ${strikeId}`);
+        // Titanium fallback: redirect to generic Stripe billing portal
+        return res.redirect(302, "https://billing.stripe.com");
+      }
+
+      // Set attribution flag: payment within next 24 hours is directly attributed
+      const attributionExpiry = new Date();
+      attributionExpiry.setHours(attributionExpiry.getHours() + 24);
+      
+      await storage.setGhostAttributionFlag(ghost.id, attributionExpiry);
+      console.log(`[ATTRIBUTION] Flag set for ghost ${ghost.id}, expires: ${attributionExpiry.toISOString()}`);
+
+      // Build Stripe invoice URL and perform high-performance 302 redirect
+      const stripeInvoiceUrl = `https://invoice.stripe.com/i/${ghost.invoiceId}`;
+      
+      return res.redirect(302, stripeInvoiceUrl);
+      
+    } catch (error: any) {
+      console.error(`[ATTRIBUTION] Error processing strike ${strikeId}:`, error.message);
+      // Titanium fallback: redirect to Stripe billing on any error
+      return res.redirect(302, "https://billing.stripe.com");
+    }
+  });
+
   // Start the Sentinel scheduler
   startScheduler();
 

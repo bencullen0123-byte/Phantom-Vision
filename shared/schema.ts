@@ -50,6 +50,8 @@ export const ghostTargets = pgTable("ghost_targets", {
   emailCount: integer("email_count").default(0).notNull(),
   status: text("status").default("pending").notNull(),
   recoveredAt: timestamp("recovered_at"),
+  // Attribution tracking: when set, payment within window is directly attributed to PHANTOM
+  attributionExpiresAt: timestamp("attribution_expires_at"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -72,6 +74,7 @@ export interface InsertGhostTarget {
   emailCount?: number;
   status?: string;
   recoveredAt?: Date | null;
+  attributionExpiresAt?: Date | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -88,6 +91,7 @@ export interface GhostTarget {
   emailCount: number;
   status: string;
   recoveredAt: Date | null;
+  attributionExpiresAt: Date | null;
 }
 
 // Raw database type (encrypted fields)

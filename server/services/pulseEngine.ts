@@ -63,8 +63,24 @@ function getNextGoldenHourWindow(goldenHour: GoldenHour | null): string | null {
   return `${dayName} at ${hourFormatted} (${nextDate.toISOString()})`;
 }
 
-function buildInvoiceUrl(invoiceId: string): string {
-  return `https://invoice.stripe.com/i/${invoiceId}`;
+function getBaseUrl(): string {
+  // Use REPLIT_DEV_DOMAIN for development URLs (modern Replit format)
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  
+  // Legacy Replit URL format
+  if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
+    return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+  }
+  
+  // Fallback for local development
+  return "http://localhost:5000";
+}
+
+function buildProxyUrl(ghostId: string): string {
+  // Attribution Proxy Link: tracks clicks and sets 24-hour attribution window
+  return `${getBaseUrl()}/api/l/${ghostId}`;
 }
 
 async function processGhostWithMerchant(
@@ -79,7 +95,8 @@ async function processGhostWithMerchant(
     }
   }
   
-  const invoiceUrl = buildInvoiceUrl(ghost.invoiceId);
+  // Use proxy URL for attribution tracking instead of direct Stripe link
+  const invoiceUrl = buildProxyUrl(ghost.id);
   
   const result = await sendRecoveryEmail(
     ghost.email,

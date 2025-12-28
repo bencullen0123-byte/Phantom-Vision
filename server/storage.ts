@@ -53,6 +53,7 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     emailCount: dbRecord.emailCount,
     status: dbRecord.status,
     recoveredAt: dbRecord.recoveredAt,
+    attributionExpiresAt: dbRecord.attributionExpiresAt,
   };
 }
 
@@ -121,6 +122,7 @@ export interface IStorage {
   markGhostExhausted(id: string): Promise<GhostTarget | undefined>;
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
+  setGhostAttributionFlag(id: string, expiresAt: Date): Promise<GhostTarget | undefined>;
   
   // Liquidity Oracle
   getLiquidityOracleEntry(id: string): Promise<LiquidityOracle | undefined>;
@@ -358,6 +360,18 @@ export class DatabaseStorage implements IStorage {
         eq(ghostTargets.status, "pending")
       ));
     return result?.count || 0;
+  }
+
+  async setGhostAttributionFlag(id: string, expiresAt: Date): Promise<GhostTarget | undefined> {
+    const [dbRecord] = await db
+      .update(ghostTargets)
+      .set({
+        attributionExpiresAt: expiresAt,
+      })
+      .where(eq(ghostTargets.id, id))
+      .returning();
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   // Liquidity Oracle
