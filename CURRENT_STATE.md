@@ -70,6 +70,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] System logs for health monitoring
 - [x] Manual trigger endpoints for testing
 - [x] **Atomic Job Locking** (database-level mutex preventing overlapping job executions)
+- [x] **Attribution Proxy Link** (`/api/l/:strikeId` sets 24h attribution window before 302 redirect to Stripe)
 
 ### API Endpoints
 
@@ -85,13 +86,14 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 | GET | `/api/system/health` | View scheduler status |
 | POST | `/api/sentinel/ghost-hunter` | Manual Ghost Hunter trigger |
 | POST | `/api/sentinel/pulse-engine` | Manual Pulse Engine trigger |
+| GET | `/api/l/:strikeId` | Attribution proxy (sets 24h window, 302 redirect to Stripe) |
 
 ### Database Tables
 
 | Table | Purpose |
 |-------|---------|
 | `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence |
-| `ghost_targets` | Encrypted PII (email, customerName), status (pending/recovered/exhausted), invoiceId |
+| `ghost_targets` | Encrypted PII (email, customerName), status (pending/recovered/exhausted), invoiceId, attributionExpiresAt |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
 | `cron_locks` | Atomic job locking to prevent overlapping cron executions |
