@@ -56,11 +56,12 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 - [x] **PII-Safe Logging** (no plaintext email/name in logs - only anonymized identifiers)
 - [x] **Transient Decryption** (PII decrypted on-demand, no persistent caching)
 
-### Stage 4: The Handshake (Webhook Infrastructure)
+### Stage 4: The Handshake (Webhook Infrastructure) ✅ HARDENED
 - [x] Stripe webhook endpoint with signature verification
 - [x] `invoice.paid` event handler
 - [x] Mark ghosts as "recovered" on payment
 - [x] Update merchant's totalRecoveredCents
+- [x] **Direct vs Organic Attribution** (recoveryType based on 24h attribution window)
 
 ### Stage 5: The Sentinel (Autonomous Operation)
 - [x] Ghost Hunter cron job (every 12 hours)
@@ -237,6 +238,26 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 | **Max Strikes** | `3` emails | Ghost marked "exhausted" after 3 emails (`pulseEngine.ts:153`) |
 | **Oracle Buffer** | `±2 hours` | Emails sent within 2h of Golden Hour (`pulseEngine.ts:32-33`) |
 | **PII Retention** | `90 days` | `purgeAt` set to discoveredAt + 90 days (`ghostHunter.ts:149-150`) |
+| **Attribution Window** | `24 hours` | Click sets `attributionExpiresAt = now + 24h` (`routes.ts:527`) |
+
+#### Direct vs Organic Attribution (`webhookHandler.ts`)
+
+The Handshake distinguishes between payments caused by PHANTOM and independent recoveries:
+
+| Recovery Type | Condition | Meaning |
+|---------------|-----------|---------|
+| **Direct** | `attributionExpiresAt > now` | Customer clicked email link and paid within 24h attribution window |
+| **Organic** | `attributionExpiresAt === null OR attributionExpiresAt <= now` | Payment occurred independently (no click tracked, or expired) |
+
+**Attribution Flow:**
+1. Recovery email sent with proxy link (`/api/l/:ghostId`)
+2. Customer clicks link → `attributionExpiresAt` set to 24h from click
+3. Proxy performs 302 redirect to Stripe invoice
+4. When Stripe webhook `invoice.paid` arrives:
+   - Check if `attributionExpiresAt` is in the future
+   - If yes → `recoveryType = 'direct'` (PHANTOM gets credit)
+   - If no → `recoveryType = 'organic'` (independent payment)
+5. Both types update `totalRecoveredCents` for merchant ROI
 
 #### Scheduler Intervals (`scheduler.ts`)
 
@@ -364,7 +385,7 @@ interface IStorage {
   getUnprocessedGhosts(): Promise<GhostTarget[]>
   getEligibleGhostsForEmail(): Promise<GhostTarget[]>
   updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined>
-  markGhostRecovered(id: string): Promise<GhostTarget | undefined>
+  markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined>
   markGhostExhausted(id: string): Promise<GhostTarget | undefined>
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>
   countActiveGhostsByMerchant(merchantId: string): Promise<number>
