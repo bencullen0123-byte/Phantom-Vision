@@ -63,6 +63,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 - [x] Max 3 strikes then mark "exhausted"
 - [x] System logs for health monitoring
 - [x] Manual trigger endpoints for testing
+- [x] **Atomic Job Locking** (database-level mutex preventing overlapping job executions)
 
 ### API Endpoints
 
@@ -87,6 +88,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 | `ghost_targets` | PII, status (pending/recovered/exhausted), invoiceId |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
+| `cron_locks` | Atomic job locking to prevent overlapping cron executions |
 
 #### Revenue Intelligence Columns (merchants table)
 
@@ -235,6 +237,34 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 | Ghost Hunter | `0 */12 * * *` | Every 12 hours at minute 0 |
 | Pulse Engine | `0 * * * *` | Every hour at minute 0 |
 
+#### Atomic Job Locking (`storage.ts` + `scheduler.ts`)
+
+The Sentinel implements industrial-grade database-level locking to prevent overlapping job executions:
+
+| Mechanism | Implementation | Location |
+|-----------|----------------|----------|
+| **Lock Table** | `cron_locks` (jobName PK, holderId, createdAt) | `schema.ts:94-99` |
+| **Lock TTL** | `60` minutes | `scheduler.ts:6` |
+| **Acquire Strategy** | Atomic UPSERT with TTL-based lock stealing | `storage.ts:327-358` |
+| **Release Strategy** | Identity-safe deletion (requires holderId match) | `storage.ts:360-372` |
+
+**Lock Acquisition Flow:**
+1. Generate unique `holderId` (UUID) for this process instance
+2. Attempt atomic `INSERT...ON CONFLICT DO UPDATE` with TTL check
+3. If existing lock is older than TTL (60 min), steal lock (considered stale/zombie)
+4. If existing lock is healthy (within TTL), return `null` (lock denied)
+5. On successful acquisition, return `{ holderId, wasStolen }` tuple
+
+**Lock Release Flow:**
+1. Delete lock only if BOTH `jobName` AND `holderId` match
+2. This prevents zombie processes from corrupting locks they no longer own
+3. If lock was stolen by another process, release fails gracefully (no action needed)
+
+**Race Condition Prevention:**
+- Atomic UPSERT eliminates "check-then-set" race condition
+- Database-level constraint ensures only one process holds lock at any time
+- TTL-based stealing recovers from crashed/stuck processes automatically
+
 #### Stripe API Version
 
 | Setting | Value | Location |
@@ -314,6 +344,10 @@ interface IStorage {
   // === System Logs ===
   createSystemLog(log: InsertSystemLog): Promise<SystemLog>
   getRecentSystemLogs(limit: number): Promise<SystemLog[]>
+  
+  // === Cron Locks ===
+  acquireJobLock(jobName: string, ttlMinutes: number): Promise<LockResult | null>
+  releaseJobLock(jobName: string, holderId: string): Promise<boolean>
 }
 ```
 
@@ -398,6 +432,14 @@ interface IStorage {
 │  │    details (text)           │                                                    │
 │  │    errorMessage (text)      │                                                    │
 │  │    runAt (timestamp)        │                                                    │
+│  └─────────────────────────────┘                                                    │
+│                                                                                      │
+│  ┌─────────────────────────────┐                                                    │
+│  │       cron_locks            │  (No FK - mutex for job execution)                 │
+│  ├─────────────────────────────┤                                                    │
+│  │ PK jobName (text)           │                                                    │
+│  │    holderId (text)          │                                                    │
+│  │    createdAt (timestamp)    │                                                    │
 │  └─────────────────────────────┘                                                    │
 │                                                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
