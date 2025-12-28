@@ -15,6 +15,10 @@ export const merchants = pgTable("merchants", {
   businessName: text("business_name"),
   supportEmail: text("support_email"),
   totalRecoveredCents: bigint("total_recovered_cents", { mode: "number" }).default(0).notNull(),
+  // Shadow Revenue Intelligence columns
+  allTimeLeakedCents: bigint("all_time_leaked_cents", { mode: "number" }).default(0).notNull(),
+  totalGhostCount: integer("total_ghost_count").default(0).notNull(),
+  lastAuditAt: timestamp("last_audit_at"),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({

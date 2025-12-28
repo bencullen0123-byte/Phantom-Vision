@@ -10,6 +10,12 @@ export interface MerchantStats {
   recoveryRate: number;
 }
 
+export interface ShadowRevenueUpdate {
+  allTimeLeakedCents: number;
+  totalGhostCount: number;
+  lastAuditAt: Date;
+}
+
 export interface IStorage {
   // Merchants
   getMerchant(id: string): Promise<Merchant | undefined>;
@@ -19,6 +25,7 @@ export interface IStorage {
   updateMerchant(id: string, updates: Partial<InsertMerchant>): Promise<Merchant | undefined>;
   incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>;
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
+  updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
   
   // Ghost Targets
   getGhostTarget(id: string): Promise<GhostTarget | undefined>;
@@ -107,6 +114,20 @@ export class DatabaseStorage implements IStorage {
       totalRecoveredCents,
       recoveryRate: Math.round(recoveryRate * 100) / 100,
     };
+  }
+
+  async updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined> {
+    // Atomic transaction: update all three Shadow Revenue fields simultaneously
+    const [updated] = await db
+      .update(merchants)
+      .set({
+        allTimeLeakedCents: data.allTimeLeakedCents,
+        totalGhostCount: data.totalGhostCount,
+        lastAuditAt: data.lastAuditAt,
+      })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   // Ghost Targets
