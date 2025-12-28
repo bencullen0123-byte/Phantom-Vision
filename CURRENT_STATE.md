@@ -42,6 +42,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] UPSERT logic on unique invoiceId (prevents duplicates)
 - [x] Backup recovery detection (marks paid invoices during scans)
 - [x] **Recursive All-Time Pagination** (Deep Harvest mode - no invoice limit)
+- [x] **Shadow Revenue Calculator** (allTimeLeakedCents, totalGhostCount, lastAuditAt)
 
 ### Stage 3: The Pulse (Email Orchestration)
 - [x] Recovery email templates via Resend
@@ -82,10 +83,26 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 
 | Table | Purpose |
 |-------|---------|
-| `merchants` | Encrypted Stripe tokens, totalRecoveredCents |
+| `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence |
 | `ghost_targets` | PII, status (pending/recovered/exhausted), invoiceId |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
+
+#### Revenue Intelligence Columns (merchants table)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `allTimeLeakedCents` | `bigint` | All-time revenue at risk from detected ghosts |
+| `totalGhostCount` | `integer` | Total number of ghosts detected in last scan |
+| `lastAuditAt` | `timestamp` | Timestamp of last successful Ghost Hunter scan |
+| `totalRecoveredCents` | `bigint` | Cumulative recovered revenue from ghost payments |
+
+**Shadow Revenue Calculation:**
+- Running tallies computed during Deep Harvest scan
+- Only counts `open` or `uncollectible` invoices (void strictly excluded)
+- Only counts invoices belonging to customers with active/past_due subscriptions
+- Atomic transaction updates all three fields simultaneously on scan completion
+- Updates only occur on successful scan (no partial scans persisted)
 
 ---
 
