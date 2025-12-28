@@ -73,7 +73,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] Zombie email prevention (getEligibleGhostsForEmail filters by status === "pending")
 - [x] All recoveries tallied to merchant `totalRecoveredCents` for ROI tracking
 
-### Stage 5: The Sentinel (Autonomous Operation)
+### Stage 5: The Sentinel (Autonomous Operation) âœ… HARDENED
 - [x] Ghost Hunter cron job (every 12 hours)
 - [x] Pulse Engine cron job (every hour)
 - [x] 4-hour grace period before first email
@@ -82,6 +82,13 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 - [x] Manual trigger endpoints for testing
 - [x] **Atomic Job Locking** (database-level mutex preventing overlapping job executions)
 - [x] **Attribution Proxy Link** (`/api/l/:strikeId` sets 24h attribution window before 302 redirect to Stripe)
+
+### Sprint 4: The Intelligent Sentinel âœ… COMPLETE
+- [x] **Intelligent Decline Branching** (soft vs hard decline categorization)
+- [x] Hard declines bypass Oracle timing + 4-hour grace period for immediate outreach
+- [x] **Tiered Capacity Gating** (tierLimit column restricts pending ghosts per merchant)
+- [x] Pre-scan gate check (abort scan if at tier limit)
+- [x] Mid-scan overflow rule (stop ingesting new ghosts but complete current batch)
 
 ### API Endpoints
 
@@ -103,7 +110,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 
 | Table | Purpose |
 |-------|---------|
-| `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence |
+| `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence, tierLimit |
 | `ghost_targets` | Encrypted PII (email, customerName), status, invoiceId, attributionExpiresAt, failureReason, declineType |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
@@ -117,6 +124,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 | `totalGhostCount` | `integer` | Total number of ghosts detected in last scan |
 | `lastAuditAt` | `timestamp` | Timestamp of last successful Ghost Hunter scan |
 | `totalRecoveredCents` | `bigint` | Cumulative recovered revenue from ghost payments |
+| `tierLimit` | `integer` | Maximum pending ghosts allowed (default: 50 - Starter Tier) |
 
 **Shadow Revenue Calculation:**
 - Running tallies computed during Deep Harvest scan
@@ -330,6 +338,39 @@ PHANTOM categorizes Stripe decline codes to branch recovery strategy:
 - Hard declines (expired card, stolen card) require customer action to update payment method
 - Waiting for Oracle Golden Hour adds unnecessary delay for inevitable failures
 - Soft declines may resolve on retry (customer depositing funds), so timing optimization is valuable
+
+#### Tiered Capacity Gating (`ghostHunter.ts`)
+
+PHANTOM enforces subscription tier limits to restrict ghost ingestion:
+
+| Tier | `tierLimit` | Target Market |
+|------|-------------|---------------|
+| **Starter** | `50` (default) | Small businesses, testing |
+| **Growth** | `200` | Growing SaaS companies |
+| **Enterprise** | `1000+` | High-volume merchants |
+
+**Pre-Scan Gate Check:**
+1. Before scan starts, count pending ghosts for merchant
+2. If `currentPendingCount >= tierLimit`, abort scan immediately
+3. Log `"Scan skipped: Tier limit of [X] reached."` to system_logs
+4. Return early with error in scan result
+
+**Mid-Scan Overflow Rule:**
+1. Track remaining capacity as scan progresses
+2. Before ingesting each new ghost, check if it already exists (updates don't count against capacity)
+3. If new ghost AND `remainingCapacity <= 0`, skip ghost but continue processing batch
+4. Log overflow condition once when first encountered
+5. Complete current batch to prevent data corruption
+
+**Capacity Logic:**
+- Only **new** ghosts decrement capacity (updates to existing ghosts are free)
+- Existing ghosts checked via `getGhostByInvoiceId` before ingestion
+- `remainingCapacity = tierLimit - currentPendingCount`
+
+**Implementation Files:**
+- Schema: `shared/schema.ts` (`merchants.tierLimit` column)
+- Gate Logic: `server/services/ghostHunter.ts` (pre-scan check + overflow rule)
+- Count Helper: `server/storage.ts` (`countActiveGhostsByMerchant`)
 
 ---
 
