@@ -30,10 +30,18 @@ export type Merchant = typeof merchants.$inferSelect;
 
 // Ghost targets table - stores transient PII for recovery
 // Status values: 'pending', 'recovered', 'exhausted'
+// PII (email, customerName) is encrypted with AES-256-GCM before storage
 export const ghostTargets = pgTable("ghost_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
-  email: text("email").notNull(),
+  // Encrypted email fields (AES-256-GCM)
+  emailCiphertext: text("email_ciphertext").notNull(),
+  emailIv: text("email_iv").notNull(),
+  emailTag: text("email_tag").notNull(),
+  // Encrypted customer name fields (AES-256-GCM)
+  customerNameCiphertext: text("customer_name_ciphertext").notNull(),
+  customerNameIv: text("customer_name_iv").notNull(),
+  customerNameTag: text("customer_name_tag").notNull(),
   amount: integer("amount").notNull(),
   invoiceId: text("invoice_id").notNull().unique(),
   discoveredAt: timestamp("discovered_at").defaultNow().notNull(),
@@ -44,13 +52,46 @@ export const ghostTargets = pgTable("ghost_targets", {
   recoveredAt: timestamp("recovered_at"),
 });
 
-export const insertGhostTargetSchema = createInsertSchema(ghostTargets).omit({
+// Internal schema for database operations (uses encrypted fields)
+export const insertGhostTargetDbSchema = createInsertSchema(ghostTargets).omit({
   id: true,
   discoveredAt: true,
 });
 
-export type InsertGhostTarget = z.infer<typeof insertGhostTargetSchema>;
-export type GhostTarget = typeof ghostTargets.$inferSelect;
+export type InsertGhostTargetDb = z.infer<typeof insertGhostTargetDbSchema>;
+
+// Application-level type with plaintext PII (used in business logic)
+export interface InsertGhostTarget {
+  merchantId: string;
+  email: string;
+  customerName: string;
+  amount: number;
+  invoiceId: string;
+  purgeAt: Date;
+  lastEmailedAt?: Date | null;
+  emailCount?: number;
+  status?: string;
+  recoveredAt?: Date | null;
+}
+
+// Application-level type with plaintext PII (returned by storage layer)
+export interface GhostTarget {
+  id: string;
+  merchantId: string;
+  email: string;
+  customerName: string;
+  amount: number;
+  invoiceId: string;
+  discoveredAt: Date;
+  purgeAt: Date;
+  lastEmailedAt: Date | null;
+  emailCount: number;
+  status: string;
+  recoveredAt: Date | null;
+}
+
+// Raw database type (encrypted fields)
+export type GhostTargetDb = typeof ghostTargets.$inferSelect;
 
 // Liquidity oracle table - stores anonymized metadata
 export const liquidityOracle = pgTable("liquidity_oracle", {
