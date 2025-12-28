@@ -89,7 +89,10 @@ async function processGhostWithMerchant(
   goldenHour: GoldenHour | null
 ): Promise<{ sent: boolean; error?: string }> {
   
-  if (merchant.recoveryStrategy === 'oracle' && goldenHour) {
+  // Intelligent Decline Branching: Hard declines bypass Oracle timing (immediate priority)
+  const isHardDecline = ghost.declineType === 'hard';
+  
+  if (!isHardDecline && merchant.recoveryStrategy === 'oracle' && goldenHour) {
     if (!isWithinGoldenHour(goldenHour)) {
       return { sent: false, error: 'Outside golden hour window' };
     }

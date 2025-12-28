@@ -1,6 +1,6 @@
 import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock } from "@shared/schema";
 import { db } from "./db";
-import { eq, count, isNull, and, sql, desc, lt, ne } from "drizzle-orm";
+import { eq, count, isNull, and, or, sql, desc, lt, ne } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
 
 export interface MerchantStats {
@@ -297,14 +297,20 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
     
+    // Intelligent Decline Branching: Hard declines bypass 4-hour grace period (immediate priority)
     const dbRecords = await db
       .select()
       .from(ghostTargets)
       .where(and(
         eq(ghostTargets.status, "pending"),
         lt(ghostTargets.emailCount, 3),
-        lt(ghostTargets.discoveredAt, fourHoursAgo),
-        sql`${ghostTargets.purgeAt} > ${now}`
+        sql`${ghostTargets.purgeAt} > ${now}`,
+        or(
+          // Standard path: Soft declines or null respect 4-hour grace period
+          lt(ghostTargets.discoveredAt, fourHoursAgo),
+          // Priority path: Hard declines bypass grace period
+          eq(ghostTargets.declineType, "hard")
+        )
       ));
     return dbRecords.map(decryptGhostTarget);
   }
