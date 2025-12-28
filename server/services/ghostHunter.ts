@@ -144,6 +144,26 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
     return result;
   }
 
+  // TIERED CAPACITY GATE: Check if merchant has reached their ghost limit
+  const tierLimit = merchant.tierLimit;
+  const currentPendingCount = await storage.countActiveGhostsByMerchant(merchantId);
+  
+  if (currentPendingCount >= tierLimit) {
+    const skipMessage = `Scan skipped: Tier limit of ${tierLimit} reached.`;
+    console.log(`[GHOST HUNTER] ${skipMessage}`);
+    await storage.createSystemLog({
+      jobName: "ghost_hunter",
+      status: "skipped",
+      details: skipMessage,
+    });
+    result.errors.push(skipMessage);
+    return result;
+  }
+  
+  // Calculate remaining capacity for this scan
+  let remainingCapacity = tierLimit - currentPendingCount;
+  console.log(`[GHOST HUNTER] Tier capacity: ${currentPendingCount}/${tierLimit} used, ${remainingCapacity} slots available`);
+
   let accessToken: string;
   try {
     accessToken = await getDecryptedToken(merchant);
@@ -163,6 +183,9 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
   let shadowRevenueTally = 0;
   let ghostCountTally = 0;
   let scanCompletedSuccessfully = false;
+  
+  // Overflow Rule: Track if we hit tier limit mid-scan
+  let tierLimitReached = false;
 
   // Recursive cursor-based pagination - no invoice limit
   while (hasMore) {
@@ -199,6 +222,20 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
             const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
 
             if (hasActiveSub) {
+              // OVERFLOW RULE: Check if we still have capacity before ingesting new ghost
+              // Note: We check if this invoice already exists - updates don't count against capacity
+              const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
+              const isNewGhost = !existingGhost;
+              
+              if (isNewGhost && remainingCapacity <= 0) {
+                // Hit tier limit mid-scan - stop ingesting new ghosts
+                if (!tierLimitReached) {
+                  tierLimitReached = true;
+                  console.log(`[GHOST HUNTER] Tier limit of ${tierLimit} reached mid-scan. Completing current batch but skipping new ghosts.`);
+                }
+                continue; // Skip this ghost but continue processing the batch
+              }
+              
               const email = invoice.customer_email || "unknown";
               // Extract customer name from Stripe invoice (fallback to customer email or "Unknown")
               let customerName = invoice.customer_name || email || "Unknown Customer";
@@ -242,8 +279,13 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
               // Shadow Revenue Calculator: increment running tallies
               shadowRevenueTally += amount;
               ghostCountTally++;
+              
+              // Decrement remaining capacity only for newly ingested ghosts
+              if (isNewGhost) {
+                remainingCapacity--;
+              }
 
-              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}`);
+              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'}`);
             }
           }
         } else if (invoice.status === "paid") {
