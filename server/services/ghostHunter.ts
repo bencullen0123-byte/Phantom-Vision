@@ -9,6 +9,7 @@ const INITIAL_BACKOFF_MS = 1000;
 
 interface GhostResult {
   email: string;
+  customerName: string;
   amount: number;
   invoiceId: string;
   customerId: string;
@@ -159,15 +160,22 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
 
             if (hasActiveSub) {
               const email = invoice.customer_email || "unknown";
+              // Extract customer name from Stripe invoice (fallback to customer email or "Unknown")
+              let customerName = invoice.customer_name || email || "Unknown Customer";
+              // If invoice.customer is expanded object (not just ID), try to get name
+              if (typeof invoice.customer !== "string" && invoice.customer && "name" in invoice.customer) {
+                customerName = (invoice.customer as { name?: string | null }).name || customerName;
+              }
               const amount = invoice.amount_due || 0;
 
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
-              // UPSERT on invoiceId prevents duplicates
+              // UPSERT on invoiceId prevents duplicates (PII encrypted before storage)
               await storage.upsertGhostTarget({
                 merchantId,
                 email,
+                customerName,
                 amount,
                 invoiceId: invoice.id,
                 purgeAt,
@@ -176,6 +184,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
 
               result.ghostsFound.push({
                 email,
+                customerName,
                 amount,
                 invoiceId: invoice.id,
                 customerId,
