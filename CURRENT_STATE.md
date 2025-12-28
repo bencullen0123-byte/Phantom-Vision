@@ -85,7 +85,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"â
 | Table | Purpose |
 |-------|---------|
 | `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence |
-| `ghost_targets` | PII, status (pending/recovered/exhausted), invoiceId |
+| `ghost_targets` | Encrypted PII (email, customerName), status (pending/recovered/exhausted), invoiceId |
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
 | `cron_locks` | Atomic job locking to prevent overlapping cron executions |
@@ -275,6 +275,10 @@ The Sentinel implements industrial-grade database-level locking to prevent overl
 
 ### 3. Security & Encryption Perimeter
 
+#### Identity Encryption Wrapper (crypto.ts)
+
+All PII is encrypted at rest using AES-256-GCM before database storage. The storage layer transparently encrypts on write and decrypts on read.
+
 #### Fields Processed Through `crypto.ts`
 
 | Table | Field | Encryption Status |
@@ -282,16 +286,36 @@ The Sentinel implements industrial-grade database-level locking to prevent overl
 | `merchants` | `encryptedToken` | **CIPHERTEXT** (AES-256-GCM) |
 | `merchants` | `iv` | Hex-encoded IV (12 bytes) |
 | `merchants` | `tag` | Hex-encoded auth tag (16 bytes) |
+| `ghost_targets` | `emailCiphertext` | **CIPHERTEXT** (AES-256-GCM) |
+| `ghost_targets` | `emailIv` | Hex-encoded IV (12 bytes) |
+| `ghost_targets` | `emailTag` | Hex-encoded auth tag (16 bytes) |
+| `ghost_targets` | `customerNameCiphertext` | **CIPHERTEXT** (AES-256-GCM) |
+| `ghost_targets` | `customerNameIv` | Hex-encoded IV (12 bytes) |
+| `ghost_targets` | `customerNameTag` | Hex-encoded auth tag (16 bytes) |
 
 #### PII Storage Analysis (`ghost_targets`)
 
 | Field | Data Type | Storage Format | Encryption |
 |-------|-----------|----------------|------------|
-| `email` | `text` | **PLAINTEXT** | None |
-| `amount` | `integer` | **PLAINTEXT** | None |
-| `invoiceId` | `text` | **PLAINTEXT** | None |
+| `email` | `text` (triplet) | **CIPHERTEXT** | AES-256-GCM |
+| `customerName` | `text` (triplet) | **CIPHERTEXT** | AES-256-GCM |
+| `amount` | `integer` | **PLAINTEXT** | None (not PII) |
+| `invoiceId` | `text` | **PLAINTEXT** | None (Stripe reference) |
 
-**Security Note:** Ghost target PII (email, amount) is stored in plaintext. The 90-day auto-purge (`purgeAt`) is the primary data protection mechanism for transient PII.
+**Security Model:**
+- All PII (email, customerName) encrypted before database insertion
+- Each encryption operation generates new 12-byte random IV (forward secrecy)
+- Titanium error handling: decryption failures return `ENCRYPTION_ERROR` placeholder instead of crashing
+- Storage layer encapsulates encryption (callers pass plaintext, storage encrypts/decrypts)
+- 90-day auto-purge (`purgeAt`) provides additional data minimization
+
+#### Customer Name Extraction (`ghostHunter.ts`)
+
+Customer name extracted from Stripe with fallback chain:
+1. `invoice.customer_name` (primary source)
+2. `invoice.customer.name` (if customer expanded)
+3. `invoice.customer_email` (fallback)
+4. `"Unknown Customer"` (default)
 
 #### Encryption Specifications (`crypto.ts`)
 
