@@ -224,9 +224,9 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 
 | Criterion | Implementation | Location |
 |-----------|----------------|----------|
-| **Invoice Status** | `status === "open"` OR `status === "uncollectible"` | `ghostHunter.ts:135` |
-| **Has Customer ID** | `invoice.customer` is not null/undefined | `ghostHunter.ts:136-138` |
-| **Active Subscription** | Customer has subscription with `status === "active"` OR `status === "past_due"` | `ghostHunter.ts:68-69` |
+| **Invoice Status** | `status === "open"` OR `status === "uncollectible"` | `ghostHunter.ts:213` |
+| **Has Customer ID** | `invoice.customer` is not null/undefined | `ghostHunter.ts:214-216` |
+| **Active Subscription** | Customer has subscription with `status === "active"` OR `status === "past_due"` | `ghostHunter.ts:110` |
 
 **Dead Ghost Filter:** Invoices from customers with ONLY canceled subscriptions are ignored (not inserted).
 
@@ -255,12 +255,12 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 
 | Rule | Value | Implementation |
 |------|-------|----------------|
-| **Grace Period** | `4 hours` | Ghost must exist >4h before first email (`storage.ts:172`) |
-| **Max Strikes** | `3` emails | Ghost marked "exhausted" after 3 emails (`pulseEngine.ts:153`) |
-| **Oracle Buffer** | `±2 hours` | Emails sent within 2h of Golden Hour (`pulseEngine.ts:32-33`) |
-| **PII Retention** | `90 days` | `purgeAt` set to discoveredAt + 90 days (`ghostHunter.ts:149-150`) |
-| **Attribution Window** | `24 hours` | Click sets `attributionExpiresAt = now + 24h` (`routes.ts:527`) |
-| **Immutable Recovery** | Once recovered | `markGhostRecovered` aborts if `status === 'recovered'` (`storage.ts:322-337`) |
+| **Grace Period** | `4 hours` | Ghost must exist >4h before first email (`storage.ts:300-311`) |
+| **Max Strikes** | `3` emails | Ghost marked "exhausted" after 3 emails (`pulseEngine.ts:176`) |
+| **Oracle Buffer** | `±2 hours` | Emails sent within 2h of Golden Hour (`pulseEngine.ts:33-35`) |
+| **PII Retention** | `90 days` | `purgeAt` set to discoveredAt + 90 days (`ghostHunter.ts:253-254`) |
+| **Attribution Window** | `24 hours` | Click sets `attributionExpiresAt = now + 24h` (`routes.ts:507`) |
+| **Immutable Recovery** | Once recovered | `markGhostRecovered` aborts if `status === 'recovered'` (`storage.ts:331`) |
 
 #### Direct vs Organic Attribution (`webhookHandler.ts`)
 
@@ -294,10 +294,10 @@ The Sentinel implements industrial-grade database-level locking to prevent overl
 
 | Mechanism | Implementation | Location |
 |-----------|----------------|----------|
-| **Lock Table** | `cron_locks` (jobName PK, holderId, createdAt) | `schema.ts:94-99` |
-| **Lock TTL** | `60` minutes | `scheduler.ts:6` |
-| **Acquire Strategy** | Atomic UPSERT with TTL-based lock stealing | `storage.ts:327-358` |
-| **Release Strategy** | Identity-safe deletion (requires holderId match) | `storage.ts:360-372` |
+| **Lock Table** | `cron_locks` (jobName PK, holderId, createdAt) | `schema.ts:151-157` |
+| **Lock TTL** | `60` minutes | `scheduler.ts:7` |
+| **Acquire Strategy** | Atomic UPSERT with TTL-based lock stealing | `storage.ts:452` |
+| **Release Strategy** | Identity-safe deletion (requires holderId match) | `storage.ts:485` |
 
 **Lock Acquisition Flow:**
 1. Generate unique `holderId` (UUID) for this process instance
