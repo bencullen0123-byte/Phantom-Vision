@@ -54,6 +54,7 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     status: dbRecord.status,
     recoveredAt: dbRecord.recoveredAt,
     attributionExpiresAt: dbRecord.attributionExpiresAt,
+    recoveryType: dbRecord.recoveryType,
   };
 }
 
@@ -118,7 +119,7 @@ export interface IStorage {
   getUnprocessedGhosts(): Promise<GhostTarget[]>;
   getEligibleGhostsForEmail(): Promise<GhostTarget[]>;
   updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined>;
-  markGhostRecovered(id: string): Promise<GhostTarget | undefined>;
+  markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined>;
   markGhostExhausted(id: string): Promise<GhostTarget | undefined>;
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
@@ -315,12 +316,13 @@ export class DatabaseStorage implements IStorage {
     return decryptGhostTarget(dbRecord);
   }
 
-  async markGhostRecovered(id: string): Promise<GhostTarget | undefined> {
+  async markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined> {
     const [dbRecord] = await db
       .update(ghostTargets)
       .set({
         status: "recovered",
         recoveredAt: new Date(),
+        recoveryType: recoveryType,
       })
       .where(eq(ghostTargets.id, id))
       .returning();

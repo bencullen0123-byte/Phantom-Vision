@@ -52,6 +52,8 @@ export const ghostTargets = pgTable("ghost_targets", {
   recoveredAt: timestamp("recovered_at"),
   // Attribution tracking: when set, payment within window is directly attributed to PHANTOM
   attributionExpiresAt: timestamp("attribution_expires_at"),
+  // Recovery type: 'direct' (PHANTOM-attributed) or 'organic' (independent payment)
+  recoveryType: text("recovery_type"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -75,6 +77,7 @@ export interface InsertGhostTarget {
   status?: string;
   recoveredAt?: Date | null;
   attributionExpiresAt?: Date | null;
+  recoveryType?: string | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -92,6 +95,7 @@ export interface GhostTarget {
   status: string;
   recoveredAt: Date | null;
   attributionExpiresAt: Date | null;
+  recoveryType: string | null;
 }
 
 // Raw database type (encrypted fields)

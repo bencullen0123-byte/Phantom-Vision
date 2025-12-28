@@ -42,8 +42,19 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<Webhoo
 
   console.log(`[WEBHOOK] Found ghost target: ${ghost.id}, amount: ${ghost.amount}`);
 
-  await storage.markGhostRecovered(ghost.id);
-  console.log(`[WEBHOOK] Ghost ${ghost.id} marked as recovered`);
+  // Determine recovery type based on attribution window
+  // Direct: payment occurred within 24h attribution window (PHANTOM-attributed)
+  // Organic: payment occurred independently (no attribution or expired)
+  const now = new Date();
+  const recoveryType: 'direct' | 'organic' = 
+    ghost.attributionExpiresAt && ghost.attributionExpiresAt > now 
+      ? 'direct' 
+      : 'organic';
+  
+  console.log(`[WEBHOOK] Recovery type: ${recoveryType} (attribution expires: ${ghost.attributionExpiresAt?.toISOString() || 'null'})`);
+
+  await storage.markGhostRecovered(ghost.id, recoveryType);
+  console.log(`[WEBHOOK] Ghost ${ghost.id} marked as recovered (${recoveryType})`);
 
   await storage.incrementMerchantRecovery(ghost.merchantId, ghost.amount);
   console.log(`[WEBHOOK] Incremented merchant ${ghost.merchantId} recovery by ${ghost.amount} cents`);
