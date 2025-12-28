@@ -1,6 +1,7 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, sql, desc, lt, ne } from "drizzle-orm";
+import { encrypt, decrypt } from "./utils/crypto";
 
 export interface MerchantStats {
   totalGhostsFound: number;
@@ -14,6 +15,85 @@ export interface ShadowRevenueUpdate {
   allTimeLeakedCents: number;
   totalGhostCount: number;
   lastAuditAt: Date;
+}
+
+// TITANIUM: Decryption error placeholder - prevents system-wide crash on key mismatch
+const ENCRYPTION_ERROR_PLACEHOLDER = "ENCRYPTION_ERROR";
+
+/**
+ * Decrypt a GhostTargetDb record to application-level GhostTarget with plaintext PII.
+ * Titanium Requirement: If decryption fails, returns placeholder values instead of crashing.
+ */
+function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
+  let email = ENCRYPTION_ERROR_PLACEHOLDER;
+  let customerName = ENCRYPTION_ERROR_PLACEHOLDER;
+  
+  try {
+    email = decrypt(dbRecord.emailCiphertext, dbRecord.emailIv, dbRecord.emailTag);
+  } catch (error: any) {
+    console.error(`[SECURITY] Email decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+  }
+  
+  try {
+    customerName = decrypt(dbRecord.customerNameCiphertext, dbRecord.customerNameIv, dbRecord.customerNameTag);
+  } catch (error: any) {
+    console.error(`[SECURITY] CustomerName decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+  }
+  
+  return {
+    id: dbRecord.id,
+    merchantId: dbRecord.merchantId,
+    email,
+    customerName,
+    amount: dbRecord.amount,
+    invoiceId: dbRecord.invoiceId,
+    discoveredAt: dbRecord.discoveredAt,
+    purgeAt: dbRecord.purgeAt,
+    lastEmailedAt: dbRecord.lastEmailedAt,
+    emailCount: dbRecord.emailCount,
+    status: dbRecord.status,
+    recoveredAt: dbRecord.recoveredAt,
+  };
+}
+
+/**
+ * Encrypt plaintext PII fields and prepare database insert payload.
+ */
+function encryptGhostTargetForInsert(target: InsertGhostTarget): {
+  merchantId: string;
+  emailCiphertext: string;
+  emailIv: string;
+  emailTag: string;
+  customerNameCiphertext: string;
+  customerNameIv: string;
+  customerNameTag: string;
+  amount: number;
+  invoiceId: string;
+  purgeAt: Date;
+  lastEmailedAt?: Date | null;
+  emailCount?: number;
+  status?: string;
+  recoveredAt?: Date | null;
+} {
+  const encryptedEmail = encrypt(target.email);
+  const encryptedCustomerName = encrypt(target.customerName);
+  
+  return {
+    merchantId: target.merchantId,
+    emailCiphertext: encryptedEmail.encryptedData,
+    emailIv: encryptedEmail.iv,
+    emailTag: encryptedEmail.tag,
+    customerNameCiphertext: encryptedCustomerName.encryptedData,
+    customerNameIv: encryptedCustomerName.iv,
+    customerNameTag: encryptedCustomerName.tag,
+    amount: target.amount,
+    invoiceId: target.invoiceId,
+    purgeAt: target.purgeAt,
+    lastEmailedAt: target.lastEmailedAt,
+    emailCount: target.emailCount,
+    status: target.status,
+    recoveredAt: target.recoveredAt,
+  };
 }
 
 export interface IStorage {
@@ -134,38 +214,48 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  // Ghost Targets
+  // Ghost Targets (with AES-256-GCM encryption for PII)
   async getGhostTarget(id: string): Promise<GhostTarget | undefined> {
-    const [target] = await db.select().from(ghostTargets).where(eq(ghostTargets.id, id));
-    return target || undefined;
+    const [dbRecord] = await db.select().from(ghostTargets).where(eq(ghostTargets.id, id));
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   async getGhostTargetsByMerchant(merchantId: string): Promise<GhostTarget[]> {
-    return await db.select().from(ghostTargets).where(eq(ghostTargets.merchantId, merchantId));
+    const dbRecords = await db.select().from(ghostTargets).where(eq(ghostTargets.merchantId, merchantId));
+    return dbRecords.map(decryptGhostTarget);
   }
 
   async createGhostTarget(insertTarget: InsertGhostTarget): Promise<GhostTarget> {
-    const [target] = await db
+    const encryptedPayload = encryptGhostTargetForInsert(insertTarget);
+    const [dbRecord] = await db
       .insert(ghostTargets)
-      .values(insertTarget)
+      .values(encryptedPayload)
       .returning();
-    return target;
+    return decryptGhostTarget(dbRecord);
   }
 
   async upsertGhostTarget(insertTarget: InsertGhostTarget): Promise<GhostTarget> {
-    const [target] = await db
+    const encryptedPayload = encryptGhostTargetForInsert(insertTarget);
+    const [dbRecord] = await db
       .insert(ghostTargets)
-      .values(insertTarget)
+      .values(encryptedPayload)
       .onConflictDoUpdate({
         target: ghostTargets.invoiceId,
         set: {
-          email: insertTarget.email,
-          amount: insertTarget.amount,
-          purgeAt: insertTarget.purgeAt,
+          // Re-encrypt on update (new IV for forward secrecy)
+          emailCiphertext: encryptedPayload.emailCiphertext,
+          emailIv: encryptedPayload.emailIv,
+          emailTag: encryptedPayload.emailTag,
+          customerNameCiphertext: encryptedPayload.customerNameCiphertext,
+          customerNameIv: encryptedPayload.customerNameIv,
+          customerNameTag: encryptedPayload.customerNameTag,
+          amount: encryptedPayload.amount,
+          purgeAt: encryptedPayload.purgeAt,
         },
       })
       .returning();
-    return target;
+    return decryptGhostTarget(dbRecord);
   }
 
   async countGhostsByMerchant(merchantId: string): Promise<number> {
@@ -177,26 +267,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getGhostByInvoiceId(invoiceId: string): Promise<GhostTarget | undefined> {
-    const [target] = await db.select().from(ghostTargets).where(eq(ghostTargets.invoiceId, invoiceId));
-    return target || undefined;
+    const [dbRecord] = await db.select().from(ghostTargets).where(eq(ghostTargets.invoiceId, invoiceId));
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   async getUnprocessedGhosts(): Promise<GhostTarget[]> {
     const now = new Date();
-    return await db
+    const dbRecords = await db
       .select()
       .from(ghostTargets)
       .where(and(
         isNull(ghostTargets.lastEmailedAt),
         sql`${ghostTargets.purgeAt} > ${now}`
       ));
+    return dbRecords.map(decryptGhostTarget);
   }
 
   async getEligibleGhostsForEmail(): Promise<GhostTarget[]> {
     const now = new Date();
     const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
     
-    return await db
+    const dbRecords = await db
       .select()
       .from(ghostTargets)
       .where(and(
@@ -205,10 +297,11 @@ export class DatabaseStorage implements IStorage {
         lt(ghostTargets.discoveredAt, fourHoursAgo),
         sql`${ghostTargets.purgeAt} > ${now}`
       ));
+    return dbRecords.map(decryptGhostTarget);
   }
 
   async updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined> {
-    const [updated] = await db
+    const [dbRecord] = await db
       .update(ghostTargets)
       .set({
         lastEmailedAt: new Date(),
@@ -216,11 +309,12 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(ghostTargets.id, id))
       .returning();
-    return updated || undefined;
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   async markGhostRecovered(id: string): Promise<GhostTarget | undefined> {
-    const [updated] = await db
+    const [dbRecord] = await db
       .update(ghostTargets)
       .set({
         status: "recovered",
@@ -228,18 +322,20 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(ghostTargets.id, id))
       .returning();
-    return updated || undefined;
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   async markGhostExhausted(id: string): Promise<GhostTarget | undefined> {
-    const [updated] = await db
+    const [dbRecord] = await db
       .update(ghostTargets)
       .set({
         status: "exhausted",
       })
       .where(eq(ghostTargets.id, id))
       .returning();
-    return updated || undefined;
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
   }
 
   async countRecoveredGhostsByMerchant(merchantId: string): Promise<number> {
