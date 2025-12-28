@@ -62,6 +62,14 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 - [x] Mark ghosts as "recovered" on payment
 - [x] Update merchant's totalRecoveredCents
 - [x] **Direct vs Organic Attribution** (recoveryType based on 24h attribution window)
+- [x] **Immutable Recovery Timestamps** (markGhostRecovered aborts if already recovered - prevents timestamp jitter)
+
+### Sprint 3: Financial Ledger ✅ COMPLETE
+- [x] Attribution proxy link (`/api/l/:strikeId`) sets 24h attribution window
+- [x] Direct vs Organic recovery classification in webhook handler
+- [x] Immutable `recoveredAt` timestamps (cannot be updated once set)
+- [x] Zombie email prevention (getEligibleGhostsForEmail filters by status === "pending")
+- [x] All recoveries tallied to merchant `totalRecoveredCents` for ROI tracking
 
 ### Stage 5: The Sentinel (Autonomous Operation)
 - [x] Ghost Hunter cron job (every 12 hours)
@@ -239,6 +247,7 @@ An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL 
 | **Oracle Buffer** | `±2 hours` | Emails sent within 2h of Golden Hour (`pulseEngine.ts:32-33`) |
 | **PII Retention** | `90 days` | `purgeAt` set to discoveredAt + 90 days (`ghostHunter.ts:149-150`) |
 | **Attribution Window** | `24 hours` | Click sets `attributionExpiresAt = now + 24h` (`routes.ts:527`) |
+| **Immutable Recovery** | Once recovered | `markGhostRecovered` aborts if `status === 'recovered'` (`storage.ts:322-337`) |
 
 #### Direct vs Organic Attribution (`webhookHandler.ts`)
 
