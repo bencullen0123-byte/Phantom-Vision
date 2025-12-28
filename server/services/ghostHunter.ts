@@ -117,6 +117,11 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
   let startingAfter: string | undefined;
   let totalInvoicesScanned = 0;
   let batchNumber = 0;
+  
+  // Shadow Revenue Calculator: running tallies
+  let shadowRevenueTally = 0;
+  let ghostCountTally = 0;
+  let scanCompletedSuccessfully = false;
 
   // Recursive cursor-based pagination - no invoice limit
   while (hasMore) {
@@ -139,6 +144,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
       for (const invoice of invoices.data) {
         totalInvoicesScanned++;
 
+        // STRICT EXCLUSION: void status invoices are never processed
+        // Only open or uncollectible invoices qualify for Ghost detection
         if (invoice.status === "open" || invoice.status === "uncollectible") {
           const customerId = typeof invoice.customer === "string" 
             ? invoice.customer 
@@ -175,6 +182,10 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
               });
 
               result.totalRevenueAtRisk += amount;
+              
+              // Shadow Revenue Calculator: increment running tallies
+              shadowRevenueTally += amount;
+              ghostCountTally++;
 
               console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}`);
             }
@@ -200,6 +211,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
             result.oracleDataPoints++;
           }
         }
+        // Note: "void" and "draft" status invoices are strictly excluded (not counted as leaked revenue)
       }
       // Batch processed - memory released for this batch
 
@@ -217,6 +229,26 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
     }
   }
 
+  // Check if scan completed without breaking due to errors
+  scanCompletedSuccessfully = result.errors.length === 0;
+
+  // Shadow Revenue Calculator: Atomic persistence on successful scan completion
+  if (scanCompletedSuccessfully) {
+    try {
+      await storage.updateMerchantShadowRevenue(merchantId, {
+        allTimeLeakedCents: shadowRevenueTally,
+        totalGhostCount: ghostCountTally,
+        lastAuditAt: new Date(),
+      });
+      console.log(`[GHOST HUNTER] Shadow Revenue updated: $${(shadowRevenueTally / 100).toFixed(2)} across ${ghostCountTally} ghosts`);
+    } catch (error: any) {
+      result.errors.push(`Failed to persist Shadow Revenue: ${error.message}`);
+      console.error(`[GHOST HUNTER] Shadow Revenue persistence error:`, error);
+    }
+  } else {
+    console.log(`[GHOST HUNTER] Skipping Shadow Revenue update due to scan errors`);
+  }
+
   // Summary logging
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
   console.log(`[GHOST HUNTER] DEEP HARVEST COMPLETE for merchant: ${merchantId}`);
@@ -224,6 +256,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
   console.log(`[GHOST HUNTER] Total batches processed: ${batchNumber}`);
   console.log(`[GHOST HUNTER] Ghosts found: ${result.ghostsFound.length}`);
   console.log(`[GHOST HUNTER] Revenue at risk: $${(result.totalRevenueAtRisk / 100).toFixed(2)}`);
+  console.log(`[GHOST HUNTER] Shadow Revenue (all-time): $${(shadowRevenueTally / 100).toFixed(2)}`);
   console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
 
