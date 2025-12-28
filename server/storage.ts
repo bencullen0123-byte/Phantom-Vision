@@ -317,6 +317,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined> {
+    // IMMUTABILITY: Only update if not already recovered (prevents timestamp/type jitter)
     const [dbRecord] = await db
       .update(ghostTargets)
       .set({
@@ -324,7 +325,10 @@ export class DatabaseStorage implements IStorage {
         recoveredAt: new Date(),
         recoveryType: recoveryType,
       })
-      .where(eq(ghostTargets.id, id))
+      .where(and(
+        eq(ghostTargets.id, id),
+        ne(ghostTargets.status, "recovered")
+      ))
       .returning();
     if (!dbRecord) return undefined;
     return decryptGhostTarget(dbRecord);
