@@ -1,699 +1,394 @@
-# PHANTOM Revenue Intelligence - Current State
+# PHANTOM Revenue Intelligence - Technical Manifest
 
-## Project Overview
-
-PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"—customers who retain active SaaS access despite failed payments—and executes automated recovery operations. The system operates autonomously, scanning for unpaid invoices, orchestrating recovery emails, and tracking successful payment recoveries.
-
-**Core Value Proposition:** Recover lost revenue from failed subscription payments without manual intervention.
+## Document Purpose
+Authoritative reference for the as-built state of the PHANTOM codebase. Zero aspirational content. All documentation reflects implemented logic only.
 
 ---
 
-## Current Tech Stack
+## 1. Forensic Data Schema (PostgreSQL)
 
-| Layer | Technology |
-|-------|------------|
-| **Language** | TypeScript (ESM modules) |
-| **Frontend** | React 18 + Vite |
-| **Backend** | Node.js + Express |
-| **Database** | PostgreSQL (Drizzle ORM) |
-| **UI Components** | shadcn/ui + Radix UI + Tailwind CSS |
-| **State Management** | TanStack React Query |
-| **Routing** | Wouter (frontend) |
-| **Email Service** | Resend |
-| **Payment Provider** | Stripe Connect |
-| **Scheduler** | node-cron |
-| **Encryption** | AES-256-GCM (crypto module) |
+### Table: `merchants`
+Primary identity table for connected Stripe accounts.
 
----
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | varchar | PRIMARY KEY, DEFAULT gen_random_uuid() | Internal merchant identifier |
+| `stripe_user_id` | text | NOT NULL, UNIQUE | Stripe Connect account ID |
+| `encrypted_token` | text | NOT NULL | AES-256-GCM encrypted access token (hex) |
+| `iv` | text | NOT NULL | 12-byte initialization vector (hex) |
+| `tag` | text | NOT NULL | Authentication tag (hex) |
+| `custom_email_template` | text | nullable | Optional custom recovery email HTML |
+| `recovery_strategy` | text | NOT NULL, DEFAULT 'oracle' | Strategy: 'oracle', 'aggressive', 'passive' |
+| `business_name` | text | nullable | Display name for emails |
+| `support_email` | text | nullable | Reply-to address |
+| `total_recovered_cents` | bigint | NOT NULL, DEFAULT 0 | Cumulative recovered revenue |
+| `all_time_leaked_cents` | bigint | NOT NULL, DEFAULT 0 | Total identified leakage |
+| `total_ghost_count` | integer | NOT NULL, DEFAULT 0 | Count of all ghost targets |
+| `last_audit_at` | timestamp | nullable | Timestamp of most recent Deep Harvest |
+| `tier_limit` | integer | NOT NULL, DEFAULT 50 | Max pending ghosts per subscription tier |
 
-## Implemented Features
+### Table: `ghost_targets`
+Transient PII storage for recovery orchestration. All customer data encrypted at rest.
 
-### Stage 1: The Titanium Gate (Security Foundation) ✅ HARDENED
-- [x] AES-256-GCM encryption vault with 12-byte IV generation
-- [x] Boot-time self-test validation (fails server if encryption broken)
-- [x] Master key validation (minimum 32 characters)
-- [x] Stripe Connect OAuth flow with CSRF state protection
-- [x] Encrypted token storage in database
-- [x] **Identity Encryption Wrapper** (email + customerName encrypted at rest)
-- [x] **Titanium Error Handling** (decryption failures return placeholder, not crash)
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | varchar | PRIMARY KEY, DEFAULT gen_random_uuid() | Ghost identifier / Strike ID |
+| `merchant_id` | varchar | NOT NULL, REFERENCES merchants(id) | Parent merchant |
+| `email_ciphertext` | text | NOT NULL | AES-256-GCM encrypted email |
+| `email_iv` | text | NOT NULL | Email encryption IV (hex) |
+| `email_tag` | text | NOT NULL | Email authentication tag (hex) |
+| `customer_name_ciphertext` | text | NOT NULL | AES-256-GCM encrypted name |
+| `customer_name_iv` | text | NOT NULL | Name encryption IV (hex) |
+| `customer_name_tag` | text | NOT NULL | Name authentication tag (hex) |
+| `amount` | integer | NOT NULL | Invoice amount in cents |
+| `invoice_id` | text | NOT NULL, UNIQUE | Stripe invoice ID |
+| `discovered_at` | timestamp | NOT NULL, DEFAULT NOW() | When ghost was identified |
+| `purge_at` | timestamp | NOT NULL | 90-day auto-deletion timestamp |
+| `last_emailed_at` | timestamp | nullable | Most recent email dispatch |
+| `email_count` | integer | NOT NULL, DEFAULT 0 | Total emails sent (max 3) |
+| `status` | text | NOT NULL, DEFAULT 'pending' | Status enum: pending, recovered, exhausted |
+| `recovered_at` | timestamp | nullable | Payment confirmation timestamp |
+| `attribution_expires_at` | timestamp | nullable | 24h attribution window expiry |
+| `recovery_type` | text | nullable | 'direct' or 'organic' (set on recovery) |
+| `failure_reason` | text | nullable | Raw Stripe decline code |
+| `decline_type` | text | nullable | Classified: 'expired_card', 'insufficient_funds', etc. |
 
-### Stage 2: The Ghost Hunter (Forensic Audit) ✅ HARDENED
-- [x] Scan merchant's Stripe account for unpaid invoices
-- [x] Cross-reference with active/past_due subscriptions
-- [x] Filter out "Dead Ghosts" (canceled subscriptions)
-- [x] UPSERT logic on unique invoiceId (prevents duplicates)
-- [x] Backup recovery detection (marks paid invoices during scans)
-- [x] **Recursive All-Time Pagination** (Deep Harvest mode - no invoice limit)
-- [x] **Shadow Revenue Calculator** (allTimeLeakedCents, totalGhostCount, lastAuditAt)
-- [x] **Customer Name Extraction** (from Stripe invoice with fallback chain)
-- [x] **Intelligent Decline Branching** (extracts decline_code, categorizes as soft/hard)
+**Foreign Key Relationship:**
+- `ghost_targets.merchant_id` -> `merchants.id`
 
-### Stage 3: The Pulse (Email Orchestration) ✅ HARDENED
-- [x] Recovery email templates via Resend
-- [x] Oracle timing intelligence (Golden Hour strategy)
-- [x] 2-hour buffer around optimal send times
-- [x] Email tracking (strikes count, lastEmailedAt)
-- [x] **Personalized Greeting** (Hi [Name] using decrypted customerName)
-- [x] **PII-Safe Logging** (no plaintext email/name in logs - only anonymized identifiers)
-- [x] **Transient Decryption** (PII decrypted on-demand, no persistent caching)
-- [x] **Intelligent Decline Branching** (hard declines bypass Oracle timing + 4h grace period)
+### Table: `system_logs`
+Global job execution logging for health monitoring.
 
-### Stage 4: The Handshake (Webhook Infrastructure) ✅ HARDENED
-- [x] Stripe webhook endpoint with signature verification
-- [x] `invoice.paid` event handler
-- [x] Mark ghosts as "recovered" on payment
-- [x] Update merchant's totalRecoveredCents
-- [x] **Direct vs Organic Attribution** (recoveryType based on 24h attribution window)
-- [x] **Immutable Recovery Timestamps** (markGhostRecovered aborts if already recovered - prevents timestamp jitter)
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | varchar | PRIMARY KEY, DEFAULT gen_random_uuid() | Log entry ID |
+| `job_name` | text | NOT NULL | Job identifier: 'ghost_hunter', 'pulse_engine' |
+| `status` | text | NOT NULL | Execution status: 'success', 'failed', 'partial' |
+| `details` | text | nullable | Human-readable execution summary |
+| `error_message` | text | nullable | Error details if failed |
+| `run_at` | timestamp | NOT NULL, DEFAULT NOW() | Execution timestamp |
 
-### Sprint 3: Financial Ledger ✅ COMPLETE
-- [x] Attribution proxy link (`/api/l/:strikeId`) sets 24h attribution window
-- [x] Direct vs Organic recovery classification in webhook handler
-- [x] Immutable `recoveredAt` timestamps (cannot be updated once set)
-- [x] Zombie email prevention (getEligibleGhostsForEmail filters by status === "pending")
-- [x] All recoveries tallied to merchant `totalRecoveredCents` for ROI tracking
+### Table: `liquidity_oracle`
+Anonymized payment timing metadata for Golden Hour prediction.
 
-### Stage 5: The Sentinel (Autonomous Operation) ✅ HARDENED
-- [x] Ghost Hunter cron job (every 12 hours)
-- [x] Pulse Engine cron job (every hour)
-- [x] 4-hour grace period before first email
-- [x] Max 3 strikes then mark "exhausted"
-- [x] System logs for health monitoring
-- [x] Manual trigger endpoints for testing
-- [x] **Atomic Job Locking** (database-level mutex preventing overlapping job executions)
-- [x] **Attribution Proxy Link** (`/api/l/:strikeId` sets 24h attribution window before 302 redirect to Stripe)
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | varchar | PRIMARY KEY, DEFAULT gen_random_uuid() | Entry ID |
+| `merchant_id` | varchar | NOT NULL, REFERENCES merchants(id) | Parent merchant |
+| `business_category` | text | NOT NULL | Merchant category code |
+| `day_of_week` | integer | NOT NULL | 0-6 (Sunday-Saturday) |
+| `hour_of_day` | integer | NOT NULL | 0-23 |
+| `recorded_at` | timestamp | NOT NULL, DEFAULT NOW() | When payment occurred |
 
-### Sprint 4: The Intelligent Sentinel ✅ COMPLETE
-- [x] **Intelligent Decline Branching** (soft vs hard decline categorization)
-- [x] Hard declines bypass Oracle timing + 4-hour grace period for immediate outreach
-- [x] **Tiered Capacity Gating** (tierLimit column restricts pending ghosts per merchant)
-- [x] Pre-scan gate check (abort scan if at tier limit)
-- [x] Mid-scan overflow rule (stop ingesting new ghosts but complete current batch)
+### Table: `cron_locks`
+Atomic job locking for Sentinel scheduler.
 
-### Task 0.4: Session-to-Merchant Security Binding ✅ COMPLETE
-- [x] **PostgreSQL Session Store** (connect-pg-simple with 30-day expiry)
-- [x] **requireMerchant Middleware** (extracts merchantId from session, rejects unauthenticated)
-- [x] **IDOR Prevention** (merchantId comes exclusively from server session, client params ignored)
-- [x] **/api/auth/status Endpoint** (returns `{ authenticated, merchantId }` for frontend auth check)
-- [x] **OAuth Callback Enhancement** (sets `session.merchantId` and redirects to dashboard)
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `job_name` | text | PRIMARY KEY | Job identifier |
+| `holder_id` | text | NOT NULL | UUID of lock holder |
+| `created_at` | timestamp | NOT NULL, DEFAULT NOW() | Lock acquisition time |
 
-### Task 0.5: FOUC Prevention ✅ COMPLETE
-- [x] **ObsidianSkeleton Component** (branded loading skeleton matching navbar height)
-- [x] **Slow-Pulse Animation** (2s duration CSS animation for skeleton cards)
-- [x] **Auth-Aware App Shell** (shows skeleton while `authLoading` resolves, prevents layout shift)
-
-### API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Basic health check |
-| GET | `/api/auth/stripe` | Initiate Stripe OAuth |
-| GET | `/api/auth/callback` | Handle OAuth callback (sets session.merchantId) |
-| GET | `/api/auth/status` | Check authentication status (`{ authenticated, merchantId }`) |
-| GET | `/api/auth/success` | OAuth success redirect page |
-| GET | `/api/auth/error` | OAuth error redirect page |
-| GET | `/api/audit/run` | Trigger ghost scan (uses session merchantId) |
-| GET | `/api/pulse/run` | Trigger recovery emails for all merchants |
-| POST | `/api/webhooks/stripe` | Stripe webhook receiver |
-| GET | `/api/merchant/stats` | Get merchant recovery statistics |
-| GET | `/api/system/health` | View scheduler status and logs |
-| POST | `/api/sentinel/ghost-hunter` | Manual Ghost Hunter trigger (all merchants) |
-| POST | `/api/sentinel/pulse-engine` | Manual Pulse Engine trigger (all merchants) |
-| GET | `/api/l/:strikeId` | Attribution proxy (sets 24h window, 302 redirect to Stripe) |
-
-### Database Tables
-
-| Table | Purpose |
-|-------|---------|
-| `merchants` | Encrypted Stripe tokens, totalRecoveredCents, Shadow Revenue Intelligence, tierLimit |
-| `ghost_targets` | Encrypted PII (email, customerName), status, invoiceId, attributionExpiresAt, failureReason, declineType |
-| `liquidity_oracle` | Anonymized timing metadata |
-| `system_logs` | Job execution logs for health monitoring |
-| `cron_locks` | Atomic job locking to prevent overlapping cron executions |
-| `session` | PostgreSQL session store (connect-pg-simple, auto-created) |
-
-#### Revenue Intelligence Columns (merchants table)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `allTimeLeakedCents` | `bigint` | All-time revenue at risk from detected ghosts |
-| `totalGhostCount` | `integer` | Total number of ghosts detected in last scan |
-| `lastAuditAt` | `timestamp` | Timestamp of last successful Ghost Hunter scan |
-| `totalRecoveredCents` | `bigint` | Cumulative recovered revenue from ghost payments |
-| `tierLimit` | `integer` | Maximum pending ghosts allowed (default: 50 - Starter Tier) |
-
-**Shadow Revenue Calculation:**
-- Running tallies computed during Deep Harvest scan
-- Only counts `open` or `uncollectible` invoices (void strictly excluded)
-- Only counts invoices belonging to customers with active/past_due subscriptions
-- Atomic transaction updates all three fields simultaneously on scan completion
-- Updates only occur on successful scan (no partial scans persisted)
+### Recovery Type Calculation
+The `recovery_type` field is determined by the webhook handler at payment confirmation:
+1. On link click (`/api/l/:strikeId`): Sets `attribution_expires_at` to NOW() + 24 hours
+2. On payment webhook (`invoice.paid`): Checks if `attribution_expires_at > NOW()`
+   - If true: `recovery_type = 'direct'` (PHANTOM-attributed)
+   - If false/null: `recovery_type = 'organic'` (independent payment)
 
 ---
 
-## File Structure Map
+## 2. Security & Identity Infrastructure
 
-```
-├── client/                    # React Frontend
-│   └── src/
-│       ├── components/
-│       │   ├── ui/            # shadcn/ui components (40+ components)
-│       │   ├── Layout.tsx     # Main layout with TopNav + content area
-│       │   ├── TopNav.tsx     # Obsidian-themed navigation bar (h-16)
-│       │   └── ObsidianSkeleton.tsx  # Branded loading skeleton (FOUC prevention)
-│       ├── context/
-│       │   └── MerchantContext.tsx   # Auth state + merchant stats provider
-│       ├── hooks/             # Custom hooks (use-toast, use-mobile)
-│       ├── lib/               # Utilities (queryClient, utils)
-│       ├── pages/
-│       │   ├── DashboardPage.tsx     # Main metrics dashboard
-│       │   ├── RecoveriesPage.tsx    # Ghost targets list + recovery details
-│       │   ├── GrowthPage.tsx        # Growth analytics (placeholder)
-│       │   ├── SettingsPage.tsx      # Merchant settings (placeholder)
-│       │   └── not-found.tsx         # 404 page
-│       ├── App.tsx            # Main app with auth-aware routing
-│       └── index.css          # Tailwind + theme + slow-pulse animation
-│
-├── server/                    # Express Backend
-│   ├── middleware/
-│   │   └── auth.ts            # requireMerchant session middleware
-│   ├── services/              # Core business logic
-│   │   ├── ghostHunter.ts     # Invoice scanning + ghost detection
-│   │   ├── pulseEngine.ts     # Email orchestration logic
-│   │   ├── pulseMailer.ts     # Resend email delivery
-│   │   ├── scheduler.ts       # node-cron job management
-│   │   └── webhookHandler.ts  # Stripe webhook processing
-│   ├── utils/
-│   │   └── crypto.ts          # AES-256-GCM encryption vault
-│   ├── db.ts                  # Drizzle database connection
-│   ├── routes.ts              # API route definitions
-│   ├── storage.ts             # Database access layer (IStorage)
-│   └── index.ts               # Server entry + PostgreSQL session store
-│
-├── shared/                    # Shared Types
-│   └── schema.ts              # Drizzle schema + Zod validators
-│
-├── replit.md                  # Project documentation
-├── CURRENT_STATE.md           # System state & technical manifest
-├── design_guidelines.md       # UI/UX design system
-└── ACTIVE_SPEC.md             # Feature specifications
+### Session Middleware: `requireMerchant`
+Location: `server/middleware/auth.ts`
+
+```typescript
+function requireMerchant(req, res, next) {
+  const merchantId = req.session?.merchantId;
+  if (!merchantId) {
+    return res.status(401).json({ status: "error", message: "Unauthorized" });
+  }
+  req.merchantId = merchantId;  // Binds to request object
+  next();
+}
 ```
 
+All protected routes use `req.merchantId` from session. Client-provided merchant IDs are ignored.
+
+### AES-256-GCM Encryption Flow
+Location: `server/utils/crypto.ts`
+
+**Key Derivation:**
+- Source: `ENCRYPTION_KEY` environment variable (minimum 32 characters)
+- Method: First 32 bytes extracted as UTF-8 buffer
+- Algorithm: `aes-256-gcm`
+- IV Length: 12 bytes (96-bit, NIST recommended)
+
+**Encrypt Function:**
+```typescript
+function encrypt(plaintext: string): { encryptedData: string, iv: string, tag: string }
+```
+1. Generate random 12-byte IV via `crypto.randomBytes()`
+2. Create cipher with `createCipheriv('aes-256-gcm', key, iv)`
+3. Encrypt plaintext, finalize cipher
+4. Extract authentication tag via `cipher.getAuthTag()`
+5. Return hex-encoded: ciphertext, IV, tag
+
+**Decrypt Function:**
+```typescript
+function decrypt(encryptedData: string, ivHex: string, tagHex: string): string
+```
+1. Parse hex-encoded IV and tag to buffers
+2. Create decipher with `createDecipheriv('aes-256-gcm', key, iv)`
+3. Set authentication tag via `decipher.setAuthTag()`
+4. Decrypt and finalize
+5. Return plaintext (authentication failure throws)
+
+**Vault Self-Test:**
+Mandatory encrypt/decrypt validation on server boot. Server exits with code 1 if mismatch.
+
+### Stripe Connect OAuth State
+Location: `server/routes.ts`
+
+**Flow:**
+1. `/api/auth/stripe` - Generate 32-byte random state, store in HTTP-only cookie (10min expiry)
+2. Redirect to `https://connect.stripe.com/oauth/authorize` with state parameter
+3. `/api/auth/callback` - Validate state cookie matches query param (CSRF protection)
+4. Exchange authorization code for access token via `stripe.oauth.token()`
+5. Encrypt access token with AES-256-GCM
+6. Store encrypted token in `merchants` table
+7. Set `req.session.merchantId` and save session
+8. Redirect to `/` (dashboard)
+
+**Storage:**
+- `stripe_user_id`: Stored plaintext (not sensitive)
+- `access_token`: Stored as `encrypted_token`, `iv`, `tag` (AES-256-GCM)
+
 ---
 
-## Environment Variables Required
+## 3. API & Intelligence Logic
+
+### Temporal Aggregators
+Location: `server/storage.ts`
+
+**Monthly Trend (`getMonthlyTrend`):**
+```sql
+SELECT 
+  TO_CHAR(DATE_TRUNC('month', discovered_at), 'YYYY-MM') AS month,
+  SUM(CASE WHEN status IN ('pending', 'exhausted') THEN amount ELSE 0 END) AS leaked,
+  SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END) AS recovered
+FROM ghost_targets
+WHERE merchant_id = $1
+GROUP BY DATE_TRUNC('month', discovered_at)
+ORDER BY month ASC
+```
+
+**Daily Pulse (`getDailyPulse`):**
+```sql
+SELECT 
+  TO_CHAR(DATE_TRUNC('day', discovered_at), 'YYYY-MM-DD') AS date,
+  SUM(CASE WHEN status IN ('pending', 'exhausted') THEN amount ELSE 0 END) AS leaked,
+  SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END) AS recovered
+FROM ghost_targets
+WHERE merchant_id = $1
+  AND discovered_at >= (NOW() - INTERVAL '30 days')
+GROUP BY DATE_TRUNC('day', discovered_at)
+ORDER BY date ASC
+```
+
+**Historical Revenue Stats (`getHistoricalRevenueStats`):**
+Combines merchant aggregate fields with temporal data:
+```typescript
+{
+  lifetime: {
+    allTimeLeakedCents: number,
+    totalGhostCount: number,
+    totalRecoveredCents: number
+  },
+  monthlyTrend: MonthlyTrendPoint[],
+  dailyPulse: DailyPulsePoint[]
+}
+```
+
+### Intelligence Log Synthesis
+Location: `server/storage.ts` - `getIntelligenceLogs()`
+
+Synthesizes strategic reasoning strings from ghost target data:
+
+| Decline Type | Strategy String |
+|--------------|-----------------|
+| `expired_card` | "Strategy: Immediate Outreach triggered. Bypassing Oracle timing for Expired Card." |
+| `insufficient_funds` | "Strategy: Intelligent Hold. Retrying in 24h based on high-probability liquidity window." |
+| `card_declined` | "Strategy: Standard Recovery initiated. Card declined - generic failure code." |
+| `processing_error` | "Strategy: Delayed Retry. Processing error detected - temporary issue likely." |
+| `fraudulent` | "Strategy: Case Flagged. Potential fraud indicator - manual review recommended." |
+| default | "Strategy: Recovery Pulse dispatched. Email sequence initiated." |
+
+**Event Types Generated:**
+- `discovery`: Ghost identification from Deep Harvest
+- `action`: Email dispatch with decline strategy
+- `success`: Confirmed recovery with attribution type
+- `info`: Exhausted status (max 3 emails reached)
+
+---
+
+## 4. UI Architectural Patterns
+
+### Color Token System
+| Token | Value | Usage |
+|-------|-------|-------|
+| Obsidian Background | `#0A0A0A` | Global body, nav, skeleton |
+| Slate-400 | `#94a3b8` | Leaked revenue, secondary text |
+| Slate-500 | `#64748b` | Tertiary text, info logs |
+| Slate-800 | `#1e293b` | Skeleton pulse, tooltip bg |
+| Emerald-500 | `#10b981` | Recovered revenue, success states |
+| Sky-400 | `#38bdf8` | Action/decision logs |
+
+### Typography
+- **Financial Values:** JetBrains Mono for all monetary amounts, invoice IDs, technical data
+- **Body Text:** System sans-serif (Inter via Tailwind)
+- **Hero Amounts:** `text-5xl md:text-6xl lg:text-7xl` for leaked, `text-3xl md:text-4xl` for recovered
+
+### Dashboard Hero Layout (`DashboardPage.tsx`)
+Fixed height container: `h-[200px]`
+- Leaked revenue: Large slate-400 typography, top position
+- Recovered revenue: Medium emerald-500 typography, below leaked
+- Metrics row: Ghost count, Tier limit, Strategy - bottom border separator
+
+### Chart Components
+
+**MonthlyTrendChart:**
+- Type: Recharts BarChart
+- Height: 280px fixed
+- Bars: Stacked leaked (slate) + recovered (emerald)
+- Grid: 5% opacity white, horizontal only
+- X-axis: Month labels (e.g., "Dec '24")
+- Y-axis: Currency formatted
+
+**DailyPulseChart:**
+- Type: Recharts AreaChart
+- Height: 220px fixed
+- Areas: Stacked with linear gradients
+- Gradient: 30% opacity at top, 0% at bottom
+- Range: Last 30 days
+
+### Forensic Ledger (`RecoveriesPage.tsx`)
+
+**Table Structure:**
+- shadcn/ui Table components
+- Columns: Customer, Email, Amount, Invoice, Discovered, Status, Attribution
+- Sort: Default by discoveredAt DESC (most recent first)
+- Search: Filters across email, customerName, invoiceId
+
+**Status Badges:**
+| Status | Color Scheme |
+|--------|--------------|
+| Pending | indigo-500/20 bg, indigo-400 text |
+| Emailed (n) | amber-500/20 bg, amber-400 text |
+| Recovered | emerald-500/20 bg, emerald-400 text |
+| Exhausted | slate-500/20 bg, slate-400 text |
+
+**Attribution Badges:**
+| Type | Color Scheme |
+|------|--------------|
+| Direct | emerald-600/20 bg, emerald-300 text |
+| Organic | slate-600/20 bg, slate-400 text |
+
+### Intelligence Log Feed (`SystemPage.tsx`)
+- Terminal-style UI with JetBrains Mono throughout
+- Log types: discovery, action, success, info
+- Color coding: slate-500 (info/discovery), sky-400 (action), emerald-500 (success)
+- Max height 500px with overflow scroll
+- Entry format: timestamp + optional amount + message
+
+### Skeleton Strategy (`ObsidianSkeleton.tsx`)
+- Fixed min-height: `min-h-screen`
+- Nav skeleton: h-16 matching actual nav
+- Hero skeleton: h-[200px] matching MoneyHero
+- Chart skeletons: h-[280px] and h-[220px] matching actual charts
+- Animation: `animate-slow-pulse` (2s duration via Tailwind config)
+- Background: `bg-slate-800/50` for elements, `bg-[#0A0A0A]` for body
+
+---
+
+## 5. Express Routes Map
+
+### Public Routes (No Auth)
+
+| Method | Path | Handler | Description |
+|--------|------|---------|-------------|
+| GET | `/api/health` | Inline | System health check with vault status |
+| GET | `/api/auth/status` | Inline | Session authentication check |
+| GET | `/api/auth/stripe` | Inline | OAuth initiation redirect |
+| GET | `/api/auth/callback` | Inline | OAuth callback, token exchange |
+| GET | `/api/auth/success` | Inline | Post-OAuth success response |
+| GET | `/api/auth/error` | Inline | OAuth error display |
+| POST | `/api/webhooks/stripe` | `handleWebhookEvent` | Stripe payment webhooks |
+| GET | `/api/system/health` | `getSystemHealth` | Scheduler status and logs |
+
+### Protected Routes (requireMerchant)
+
+| Method | Path | Handler | Frontend View |
+|--------|------|---------|---------------|
+| POST | `/api/audit/run` | `runAuditForMerchant` | DashboardPage (DeepHarvestGate) |
+| GET | `/api/merchant/stats` | `getHistoricalRevenueStats` | DashboardPage (MoneyHero + Charts) |
+| GET | `/api/merchant/ghosts` | `getGhostTargetsByMerchant` | RecoveriesPage (GhostLedger) |
+| GET | `/api/merchant/logs` | `getIntelligenceLogs` | SystemPage (IntelligenceLogFeed) |
+
+### Attribution Routes
+
+| Method | Path | Handler | Description |
+|--------|------|---------|-------------|
+| GET | `/api/l/:strikeId` | Inline | Attribution link proxy, sets 24h window, redirects to Stripe invoice |
+
+### Manual Trigger Routes (No Auth - Admin/Testing)
+
+| Method | Path | Handler | Description |
+|--------|------|---------|-------------|
+| GET | `/api/pulse/run` | `processQueue` | Manual pulse engine trigger |
+| POST | `/api/sentinel/ghost-hunter` | `runGhostHunterJob` | Manual Deep Harvest trigger |
+| POST | `/api/sentinel/pulse-engine` | `runPulseEngineJob` | Manual email queue trigger |
+
+### Frontend Routes (wouter)
+
+| Path | Component | Auth Required |
+|------|-----------|---------------|
+| `/` | DashboardPage | Yes (shows ConnectStripeGate if not) |
+| `/recoveries` | RecoveriesPage | Yes |
+| `/growth` | GrowthPage | Yes |
+| `/system` | SystemPage | Yes |
+| `/settings` | SettingsPage | Yes |
+| `*` | NotFound | No |
+
+---
+
+## 6. Sentinel Scheduler
+
+**Jobs:**
+- Ghost Hunter: Every 12 hours at minute 0
+- Pulse Engine: Every hour at minute 0
+
+**Defensive Rules:**
+- 4-hour grace period before emailing new ghosts
+- Maximum 3 emails per ghost (then status = 'exhausted')
+
+**Lock Mechanism:**
+- Atomic PostgreSQL UPSERT with TTL-based lock stealing
+- 30-minute TTL for stale lock recovery
+- Identity-safe release (holderId verification)
+
+---
+
+## 7. Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `ENCRYPTION_KEY` | Master encryption key (32+ chars) |
+| `SESSION_SECRET` | Express session signing key |
 | `STRIPE_CLIENT_ID` | Stripe Connect app ID |
 | `STRIPE_SECRET_KEY` | Stripe API secret |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 
-**Email Service:** Uses Replit's Resend connector integration (`REPLIT_CONNECTORS_HOSTNAME`) - no manual API key required.
-
----
-
-## Technical Manifest
-
-### 1. Data Flow & Pipeline Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                           PHANTOM DATA PIPELINE                                      │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                      │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │   STRIPE     │───▶│   GHOST      │───▶│   PULSE      │───▶│   RESEND     │      │
-│  │   CONNECT    │    │   HUNTER     │    │   ENGINE     │    │   MAILER     │      │
-│  │   (OAuth)    │    │   (Scan)     │    │   (Timing)   │    │   (Deliver)  │      │
-│  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘      │
-│         │                   │                   │                   │              │
-│         ▼                   ▼                   ▼                   ▼              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  merchants   │    │ghost_targets │    │liquidity_    │    │   WEBHOOK    │      │
-│  │  (tokens)    │    │  (ghosts)    │    │oracle        │    │   HANDLER    │      │
-│  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘      │
-│                                                                      │              │
-│                                          ┌───────────────────────────┘              │
-│                                          ▼                                          │
-│                                   ┌──────────────┐                                  │
-│                                   │   RECOVERY   │                                  │
-│                                   │   CONFIRMED  │                                  │
-│                                   └──────────────┘                                  │
-│                                                                                      │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### Invoice-to-Ghost Promotion Criteria
-
-An invoice is promoted from raw Stripe record to `ghost_targets` entry when ALL of the following are true:
-
-| Criterion | Implementation | Location |
-|-----------|----------------|----------|
-| **Invoice Status** | `status === "open"` OR `status === "uncollectible"` | `ghostHunter.ts:213` |
-| **Has Customer ID** | `invoice.customer` is not null/undefined | `ghostHunter.ts:214-216` |
-| **Active Subscription** | Customer has subscription with `status === "active"` OR `status === "past_due"` | `ghostHunter.ts:110` |
-
-**Dead Ghost Filter:** Invoices from customers with ONLY canceled subscriptions are ignored (not inserted).
-
----
-
-### 2. Logical Constraints & Hard-Codes
-
-#### Rate Limiting & Pagination (`ghostHunter.ts`)
-
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `RATE_LIMIT_DELAY_MS` | `100` ms | Delay between Stripe API calls |
-| `MAX_RETRIES` | `3` | Retry attempts on 429 rate limit |
-| `INITIAL_BACKOFF_MS` | `1000` ms | Initial exponential backoff |
-| `limit` (per API call) | `100` | Invoices fetched per Stripe API request (maximum allowed) |
-| `subscriptions.limit` | `10` | Subscriptions checked per customer |
-
-**Pagination Mode: RECURSIVE (Deep Harvest)**
-- No invoice limit - scans ALL invoices in merchant's Stripe history
-- Uses `starting_after` cursor for pagination
-- Processes each batch of 100 invoices in-loop (memory-safe)
-- Batches discarded after database UPSERT completes
-- Continues while `has_more: true` from Stripe API
-
-#### Defensive Rules (`pulseEngine.ts` + `storage.ts`)
-
-| Rule | Value | Implementation |
-|------|-------|----------------|
-| **Grace Period** | `4 hours` | Ghost must exist >4h before first email (`storage.ts:300-311`) |
-| **Max Strikes** | `3` emails | Ghost marked "exhausted" after 3 emails (`pulseEngine.ts:176`) |
-| **Oracle Buffer** | `±2 hours` | Emails sent within 2h of Golden Hour (`pulseEngine.ts:33-35`) |
-| **PII Retention** | `90 days` | `purgeAt` set to discoveredAt + 90 days (`ghostHunter.ts:253-254`) |
-| **Attribution Window** | `24 hours` | Click sets `attributionExpiresAt = now + 24h` (`routes.ts:507`) |
-| **Immutable Recovery** | Once recovered | `markGhostRecovered` aborts if `status === 'recovered'` (`storage.ts:331`) |
-
-#### Direct vs Organic Attribution (`webhookHandler.ts`)
-
-The Handshake distinguishes between payments caused by PHANTOM and independent recoveries:
-
-| Recovery Type | Condition | Meaning |
-|---------------|-----------|---------|
-| **Direct** | `attributionExpiresAt > now` | Customer clicked email link and paid within 24h attribution window |
-| **Organic** | `attributionExpiresAt === null OR attributionExpiresAt <= now` | Payment occurred independently (no click tracked, or expired) |
-
-**Attribution Flow:**
-1. Recovery email sent with proxy link (`/api/l/:ghostId`)
-2. Customer clicks link → `attributionExpiresAt` set to 24h from click
-3. Proxy performs 302 redirect to Stripe invoice
-4. When Stripe webhook `invoice.paid` arrives:
-   - Check if `attributionExpiresAt` is in the future
-   - If yes → `recoveryType = 'direct'` (PHANTOM gets credit)
-   - If no → `recoveryType = 'organic'` (independent payment)
-5. Both types update `totalRecoveredCents` for merchant ROI
-
-#### Scheduler Intervals (`scheduler.ts`)
-
-| Job | Cron Expression | Frequency |
-|-----|-----------------|-----------|
-| Ghost Hunter | `0 */12 * * *` | Every 12 hours at minute 0 |
-| Pulse Engine | `0 * * * *` | Every hour at minute 0 |
-
-#### Atomic Job Locking (`storage.ts` + `scheduler.ts`)
-
-The Sentinel implements industrial-grade database-level locking to prevent overlapping job executions:
-
-| Mechanism | Implementation | Location |
-|-----------|----------------|----------|
-| **Lock Table** | `cron_locks` (jobName PK, holderId, createdAt) | `schema.ts:151-157` |
-| **Lock TTL** | `60` minutes | `scheduler.ts:7` |
-| **Acquire Strategy** | Atomic UPSERT with TTL-based lock stealing | `storage.ts:452` |
-| **Release Strategy** | Identity-safe deletion (requires holderId match) | `storage.ts:485` |
-
-**Lock Acquisition Flow:**
-1. Generate unique `holderId` (UUID) for this process instance
-2. Attempt atomic `INSERT...ON CONFLICT DO UPDATE` with TTL check
-3. If existing lock is older than TTL (60 min), steal lock (considered stale/zombie)
-4. If existing lock is healthy (within TTL), return `null` (lock denied)
-5. On successful acquisition, return `{ holderId, wasStolen }` tuple
-
-**Lock Release Flow:**
-1. Delete lock only if BOTH `jobName` AND `holderId` match
-2. This prevents zombie processes from corrupting locks they no longer own
-3. If lock was stolen by another process, release fails gracefully (no action needed)
-
-**Race Condition Prevention:**
-- Atomic UPSERT eliminates "check-then-set" race condition
-- Database-level constraint ensures only one process holds lock at any time
-- TTL-based stealing recovers from crashed/stuck processes automatically
-
-#### Stripe API Version
-
-| Setting | Value | Location |
-|---------|-------|----------|
-| `apiVersion` | `"2025-12-15.clover"` | `ghostHunter.ts:48` |
-
-#### Intelligent Decline Branching (`ghostHunter.ts` + `pulseEngine.ts`)
-
-PHANTOM categorizes Stripe decline codes to branch recovery strategy:
-
-| Category | Decline Codes | Behavior |
-|----------|---------------|----------|
-| **Soft** | `insufficient_funds`, `card_velocity_exceeded`, `try_again_later`, `processing_error`, `reenter_transaction`, `do_not_honor` | Oracle timing + 4h grace period respected |
-| **Hard** | `expired_card`, `lost_card`, `stolen_card`, `incorrect_number`, `invalid_cvc`, `card_not_supported`, `card_declined`, `pickup_card` | **Immediate priority** - bypasses Oracle timing AND 4h grace period |
-
-**Implementation:**
-- Ghost Hunter extracts `last_payment_error.decline_code` from Stripe invoice
-- Stores `failureReason` (raw code) and `declineType` ('soft' | 'hard') per ghost
-- Pulse Engine checks `declineType` before applying timing restrictions
-- Storage layer's `getEligibleGhostsForEmail` uses OR condition to include hard declines immediately
-
-**Rationale:**
-- Hard declines (expired card, stolen card) require customer action to update payment method
-- Waiting for Oracle Golden Hour adds unnecessary delay for inevitable failures
-- Soft declines may resolve on retry (customer depositing funds), so timing optimization is valuable
-
-#### Tiered Capacity Gating (`ghostHunter.ts`)
-
-PHANTOM enforces subscription tier limits to restrict ghost ingestion:
-
-| Tier | `tierLimit` | Target Market |
-|------|-------------|---------------|
-| **Starter** | `50` (default) | Small businesses, testing |
-| **Growth** | `200` | Growing SaaS companies |
-| **Enterprise** | `1000+` | High-volume merchants |
-
-**Pre-Scan Gate Check:**
-1. Before scan starts, count pending ghosts for merchant
-2. If `currentPendingCount >= tierLimit`, abort scan immediately
-3. Log `"Scan skipped: Tier limit of [X] reached."` to system_logs
-4. Return early with error in scan result
-
-**Mid-Scan Overflow Rule:**
-1. Track remaining capacity as scan progresses
-2. Before ingesting each new ghost, check if it already exists (updates don't count against capacity)
-3. If new ghost AND `remainingCapacity <= 0`, skip ghost but continue processing batch
-4. Log overflow condition once when first encountered
-5. Complete current batch to prevent data corruption
-
-**Capacity Logic:**
-- Only **new** ghosts decrement capacity (updates to existing ghosts are free)
-- Existing ghosts checked via `getGhostByInvoiceId` before ingestion
-- `remainingCapacity = tierLimit - currentPendingCount`
-
-**Implementation Files:**
-- Schema: `shared/schema.ts` (`merchants.tierLimit` column)
-- Gate Logic: `server/services/ghostHunter.ts` (pre-scan check + overflow rule)
-- Count Helper: `server/storage.ts` (`countActiveGhostsByMerchant`)
-
----
-
-### 3. Security & Encryption Perimeter
-
-#### Session Security (`server/index.ts` + `server/middleware/auth.ts`)
-
-| Component | Implementation |
-|-----------|----------------|
-| **Session Store** | PostgreSQL via `connect-pg-simple` (table: `session`) |
-| **Cookie Name** | `phantom.sid` |
-| **Cookie Expiry** | 30 days (`maxAge: 30 * 24 * 60 * 60 * 1000`) |
-| **Cookie Flags** | `httpOnly: true`, `sameSite: lax`, `secure: true` (production) |
-| **Secret** | `SESSION_SECRET` environment variable |
-
-**IDOR Prevention:**
-- All protected routes use `requireMerchant` middleware
-- Middleware extracts `merchantId` exclusively from `req.session.merchantId`
-- Client-side `merchant_id` query parameters are **ignored** (not trusted)
-- Unauthenticated requests receive `401 Unauthorized`
-
-**OAuth Flow:**
-1. User initiates Stripe Connect OAuth at `/api/auth/stripe`
-2. Callback at `/api/auth/callback` exchanges code for token
-3. Token encrypted and stored; `session.merchantId` set
-4. Redirect to dashboard (`/`) with valid session
-
-#### Identity Encryption Wrapper (crypto.ts)
-
-All PII is encrypted at rest using AES-256-GCM before database storage. The storage layer transparently encrypts on write and decrypts on read.
-
-#### Fields Processed Through `crypto.ts`
-
-| Table | Field | Encryption Status |
-|-------|-------|-------------------|
-| `merchants` | `encryptedToken` | **CIPHERTEXT** (AES-256-GCM) |
-| `merchants` | `iv` | Hex-encoded IV (12 bytes) |
-| `merchants` | `tag` | Hex-encoded auth tag (16 bytes) |
-| `ghost_targets` | `emailCiphertext` | **CIPHERTEXT** (AES-256-GCM) |
-| `ghost_targets` | `emailIv` | Hex-encoded IV (12 bytes) |
-| `ghost_targets` | `emailTag` | Hex-encoded auth tag (16 bytes) |
-| `ghost_targets` | `customerNameCiphertext` | **CIPHERTEXT** (AES-256-GCM) |
-| `ghost_targets` | `customerNameIv` | Hex-encoded IV (12 bytes) |
-| `ghost_targets` | `customerNameTag` | Hex-encoded auth tag (16 bytes) |
-
-#### PII Storage Analysis (`ghost_targets`)
-
-| Field | Data Type | Storage Format | Encryption |
-|-------|-----------|----------------|------------|
-| `email` | `text` (triplet) | **CIPHERTEXT** | AES-256-GCM |
-| `customerName` | `text` (triplet) | **CIPHERTEXT** | AES-256-GCM |
-| `amount` | `integer` | **PLAINTEXT** | None (not PII) |
-| `invoiceId` | `text` | **PLAINTEXT** | None (Stripe reference) |
-
-**Security Model: Encrypted at Rest with Transient Decryption-on-Demand**
-- All PII (email, customerName) encrypted before database insertion
-- Each encryption operation generates new 12-byte random IV (forward secrecy)
-- Titanium error handling: decryption failures return `ENCRYPTION_ERROR` placeholder instead of crashing
-- Storage layer encapsulates encryption (callers pass plaintext, storage encrypts/decrypts)
-- **Transient Decryption:** PII decrypted only when needed, never cached in memory or logs
-- **PII-Safe Logging:** All console.log statements use anonymized identifiers (merchantId, ghostId) - never plaintext PII
-- 90-day auto-purge (`purgeAt`) provides additional data minimization
-
-#### Customer Name Extraction (`ghostHunter.ts`)
-
-Customer name extracted from Stripe with fallback chain:
-1. `invoice.customer_name` (primary source)
-2. `invoice.customer.name` (if customer expanded)
-3. `invoice.customer_email` (fallback)
-4. `"Unknown Customer"` (default)
-
-#### Encryption Specifications (`crypto.ts`)
-
-| Parameter | Value |
-|-----------|-------|
-| Algorithm | `aes-256-gcm` |
-| IV Length | `12` bytes (96 bits) - NIST recommended |
-| Key Derivation | First 32 bytes of `ENCRYPTION_KEY` |
-| Auth Tag | 16 bytes (128 bits) |
-| Encoding | Hex for ciphertext, IV, and tag |
-
----
-
-### 4. Service Interface Audit
-
-#### `IStorage` Interface (`storage.ts:13-47`)
-
-```typescript
-interface IStorage {
-  // === Merchants ===
-  getMerchant(id: string): Promise<Merchant | undefined>
-  getMerchantByStripeUserId(stripeUserId: string): Promise<Merchant | undefined>
-  createMerchant(merchant: InsertMerchant): Promise<Merchant>
-  getAllMerchants(): Promise<Merchant[]>
-  updateMerchant(id: string, updates: Partial<InsertMerchant>): Promise<Merchant | undefined>
-  incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>
-  getMerchantStats(merchantId: string): Promise<MerchantStats>
-  
-  // === Ghost Targets ===
-  getGhostTarget(id: string): Promise<GhostTarget | undefined>
-  getGhostTargetsByMerchant(merchantId: string): Promise<GhostTarget[]>
-  createGhostTarget(target: InsertGhostTarget): Promise<GhostTarget>
-  upsertGhostTarget(target: InsertGhostTarget): Promise<GhostTarget>
-  countGhostsByMerchant(merchantId: string): Promise<number>
-  getGhostByInvoiceId(invoiceId: string): Promise<GhostTarget | undefined>
-  getUnprocessedGhosts(): Promise<GhostTarget[]>
-  getEligibleGhostsForEmail(): Promise<GhostTarget[]>
-  updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined>
-  markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined>
-  markGhostExhausted(id: string): Promise<GhostTarget | undefined>
-  countRecoveredGhostsByMerchant(merchantId: string): Promise<number>
-  countActiveGhostsByMerchant(merchantId: string): Promise<number>
-  
-  // === Liquidity Oracle ===
-  getLiquidityOracleEntry(id: string): Promise<LiquidityOracle | undefined>
-  createLiquidityOracleEntry(entry: InsertLiquidityOracle): Promise<LiquidityOracle>
-  countOracleEntriesByMerchant(merchantId: string): Promise<number>
-  getGoldenHour(merchantId: string): Promise<GoldenHour | null>
-  
-  // === System Logs ===
-  createSystemLog(log: InsertSystemLog): Promise<SystemLog>
-  getRecentSystemLogs(limit: number): Promise<SystemLog[]>
-  
-  // === Cron Locks ===
-  acquireJobLock(jobName: string, ttlMinutes: number): Promise<LockResult | null>
-  releaseJobLock(jobName: string, holderId: string): Promise<boolean>
-}
-```
-
-#### Ghost Hunter Service (`ghostHunter.ts`)
-
-| Export | Signature | I/O |
-|--------|-----------|-----|
-| `scanMerchant` | `(merchantId: string) => Promise<ScanResult>` | **In:** Merchant UUID<br>**Out:** `{ merchantId, ghostsFound[], oracleDataPoints, totalRevenueAtRisk, errors[] }` |
-| `runAuditForMerchant` | `(merchantId: string) => Promise<AuditResult>` | **In:** Merchant UUID<br>**Out:** `{ total_ghosts_found, total_revenue_at_risk, oracle_data_points, errors[] }` |
-
-#### Pulse Engine Service (`pulseEngine.ts`)
-
-| Export | Signature | I/O |
-|--------|-----------|-----|
-| `processQueue` | `() => Promise<ProcessQueueResult>` | **In:** None (reads from DB)<br>**Out:** `{ emailsSent, emailsFailed, ghostsProcessed, nextGoldenHour, errors[] }` |
-
-#### Pulse Mailer Service (`pulseMailer.ts`)
-
-| Export | Signature | I/O |
-|--------|-----------|-----|
-| `sendRecoveryEmail` | `(to: string, amount: number, invoiceUrl: string, merchant: Merchant) => Promise<SendRecoveryEmailResult>` | **In:** Email, cents, URL, merchant config<br>**Out:** `{ success, messageId?, error? }` |
-
-#### Webhook Handler Service (`webhookHandler.ts`)
-
-| Export | Signature | I/O |
-|--------|-----------|-----|
-| `handleInvoicePaid` | `(invoice: Stripe.Invoice) => Promise<WebhookResult>` | **In:** Stripe Invoice object<br>**Out:** `{ success, message, ghostRecovered?, amountRecovered? }` |
-| `handleWebhookEvent` | `(event: Stripe.Event) => Promise<WebhookResult>` | **In:** Stripe Event object<br>**Out:** Same as above |
-
-#### Scheduler Service (`scheduler.ts`)
-
-| Export | Signature | I/O |
-|--------|-----------|-----|
-| `startScheduler` | `() => void` | **In:** None<br>**Out:** Starts cron jobs (side effect) |
-| `getSystemHealth` | `() => Promise<SystemHealth>` | **In:** None<br>**Out:** `{ recentLogs[], lastGhostHunterRun, lastPulseEngineRun }` |
-| `runGhostHunterJob` | `() => Promise<void>` | **In:** None<br>**Out:** Logs to `system_logs` (side effect) |
-| `runPulseEngineJob` | `() => Promise<void>` | **In:** None<br>**Out:** Logs to `system_logs` (side effect) |
-
----
-
-### 5. Database Entity Relationship Diagram (ERD)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                 DATABASE SCHEMA                                       │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                      │
-│  ┌─────────────────────────────┐          ┌─────────────────────────────┐           │
-│  │        merchants            │          │      ghost_targets          │           │
-│  ├─────────────────────────────┤          ├─────────────────────────────┤           │
-│  │ PK id (varchar/UUID)        │◀────────┐│ PK id (varchar/UUID)        │           │
-│  │    stripeUserId (text)      │         ││ FK merchantId (varchar)     │───────────┤
-│  │    encryptedToken (text)    │         │└─────────────────────────────┤           │
-│  │    iv (text)                │         │     email (text)             │           │
-│  │    tag (text)               │         │     amount (integer)         │           │
-│  │    customEmailTemplate      │         │ UQ invoiceId (text)          │           │
-│  │    recoveryStrategy (text)  │         │     discoveredAt (timestamp) │           │
-│  │    businessName (text)      │         │     purgeAt (timestamp)      │           │
-│  │    supportEmail (text)      │         │     lastEmailedAt (timestamp)│           │
-│  │    totalRecoveredCents      │         │     emailCount (integer)     │           │
-│  └─────────────────────────────┘         │     status (text)            │           │
-│              │                           │     recoveredAt (timestamp)  │           │
-│              │                           └─────────────────────────────┘            │
-│              │                                                                       │
-│              │                           ┌─────────────────────────────┐            │
-│              │                           │    liquidity_oracle         │            │
-│              │                           ├─────────────────────────────┤            │
-│              └──────────────────────────▶│ PK id (varchar/UUID)        │            │
-│                                          │ FK merchantId (varchar)     │            │
-│                                          │    businessCategory (text)  │            │
-│                                          │    dayOfWeek (integer)      │            │
-│                                          │    hourOfDay (integer)      │            │
-│                                          │    recordedAt (timestamp)   │            │
-│                                          └─────────────────────────────┘            │
-│                                                                                      │
-│  ┌─────────────────────────────┐                                                    │
-│  │       system_logs           │  (No FK - standalone monitoring)                   │
-│  ├─────────────────────────────┤                                                    │
-│  │ PK id (varchar/UUID)        │                                                    │
-│  │    jobName (text)           │                                                    │
-│  │    status (text)            │                                                    │
-│  │    details (text)           │                                                    │
-│  │    errorMessage (text)      │                                                    │
-│  │    runAt (timestamp)        │                                                    │
-│  └─────────────────────────────┘                                                    │
-│                                                                                      │
-│  ┌─────────────────────────────┐                                                    │
-│  │       cron_locks            │  (No FK - mutex for job execution)                 │
-│  ├─────────────────────────────┤                                                    │
-│  │ PK jobName (text)           │                                                    │
-│  │    holderId (text)          │                                                    │
-│  │    createdAt (timestamp)    │                                                    │
-│  └─────────────────────────────┘                                                    │
-│                                                                                      │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### Key Relationships
-
-| Relationship | Cardinality | Foreign Key | Constraint |
-|--------------|-------------|-------------|------------|
-| `merchants` → `ghost_targets` | One-to-Many | `ghost_targets.merchantId` | References `merchants.id` |
-| `merchants` → `liquidity_oracle` | One-to-Many | `liquidity_oracle.merchantId` | References `merchants.id` |
-
-#### Multi-Tenancy Strategy
-
-| Aspect | Implementation |
-|--------|----------------|
-| **Primary Key Type** | Internal UUID (`gen_random_uuid()`) |
-| **Tenant Identifier** | `merchants.id` (UUID) |
-| **Stripe Lookup** | `merchants.stripeUserId` (Stripe account ID) |
-| **Data Isolation** | All queries filter by `merchantId` FK |
-
-**Note:** The system uses internal auto-generated UUIDs for primary keys, NOT Stripe's `account_id`. The `stripeUserId` is stored separately for OAuth lookup but is not the primary connector for relationships.
-
-#### Unique Constraints
-
-| Table | Column | Purpose |
-|-------|--------|---------|
-| `merchants` | `stripeUserId` | Prevent duplicate OAuth connections |
-| `ghost_targets` | `invoiceId` | Enable UPSERT, prevent duplicate tracking |
-
----
-
-### 7. Design System: Surgical/Titanium Aesthetic
-
-#### Color Palette
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| **Obsidian** | `#0A0A0A` | Primary background (dark mode default) |
-| **Emerald-500** | `#10B981` | Recovered revenue ONLY (success state) |
-| **Slate-400** | `#94A3B8` | Leaked/at-risk revenue |
-| **Slate-200** | `#E2E8F0` | Primary text on dark backgrounds |
-| **Slate-500** | `#64748B` | Secondary/muted text |
-| **White/10** | `rgba(255,255,255,0.1)` | Borders, dividers |
-
-#### Typography
-
-| Element | Font | Weight |
-|---------|------|--------|
-| **Prose** | Inter | 400, 500, 600 |
-| **Data/Mono** | JetBrains Mono | 400, 500 |
-
-#### Component Specifications
-
-| Component | Specification |
-|-----------|---------------|
-| **TopNav** | `h-16` (64px), sticky, Obsidian background |
-| **Cards** | `bg-slate-900`, `border-white/10`, `rounded-md` |
-| **Skeleton** | `animate-slow-pulse` (2s duration) |
-| **Buttons** | shadcn defaults with Obsidian integration |
-
-#### Animation
-
-| Name | Duration | Purpose |
-|------|----------|---------|
-| `slow-pulse` | 2s | Loading skeleton states (FOUC prevention) |
-
-**Design Philosophy:**
-- Dark-first interface reflecting security/intelligence theme
-- Emerald reserved exclusively for positive revenue recovery
-- Slate tones for all non-success states
-- Minimal borders, subtle contrast differentiations
-- JetBrains Mono for all financial/numeric data
-
----
-
-*Last Updated: December 29, 2025*
+**Email Service:** Uses Replit's Resend connector integration - no manual API key required.
