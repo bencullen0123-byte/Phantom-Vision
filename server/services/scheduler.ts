@@ -72,6 +72,10 @@ async function runGhostHunterJob(): Promise<void> {
     
     let totalGhosts = 0;
     let totalOraclePoints = 0;
+    let totalRecords = 0;
+    let peakRssMb = 0;
+    let totalUpsertMs = 0;
+    let totalUpsertCount = 0;
     const errors: string[] = [];
     
     for (const merchant of merchants) {
@@ -79,6 +83,16 @@ async function runGhostHunterJob(): Promise<void> {
         const result = await scanMerchant(merchant.id);
         totalGhosts += result.ghostsFound.length;
         totalOraclePoints += result.oracleDataPoints;
+        
+        // Aggregate telemetry from all merchant scans
+        if (result.telemetry) {
+          totalRecords += result.telemetry.recordsProcessed;
+          if (result.telemetry.peakRssMb > peakRssMb) {
+            peakRssMb = result.telemetry.peakRssMb;
+          }
+          totalUpsertMs += result.telemetry.totalUpsertMs;
+          totalUpsertCount += result.telemetry.upsertCount;
+        }
         
         if (result.errors.length > 0) {
           errors.push(...result.errors.map(e => `${merchant.id}: ${e}`));
@@ -89,7 +103,12 @@ async function runGhostHunterJob(): Promise<void> {
     }
     
     const duration = Date.now() - startTime;
-    const details = `Scanned ${merchants.length} merchants, found ${totalGhosts} ghosts, ${totalOraclePoints} oracle points in ${duration}ms`;
+    const avgUpsertMs = totalUpsertCount > 0 
+      ? Math.round(totalUpsertMs / totalUpsertCount * 100) / 100 
+      : 0;
+    
+    // DIAGNOSTIC SHELL: Final summary with telemetry
+    const details = `Scanned ${merchants.length} merchants, ${totalRecords} records, found ${totalGhosts} ghosts in ${duration}ms | Peak RSS: ${peakRssMb}MB | Avg UPSERT: ${avgUpsertMs}ms`;
     
     await logJobResult({
       jobName: "ghost_hunter",

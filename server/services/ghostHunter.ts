@@ -1,11 +1,24 @@
 import Stripe from "stripe";
 import { storage } from "../storage";
-import { decrypt } from "../utils/crypto";
+import { decrypt, vaultDiagnostic } from "../utils/crypto";
 import type { Merchant } from "@shared/schema";
 
-const RATE_LIMIT_DELAY_MS = 100;
+// Diagnostic Shell Constants
+const THROTTLE_BATCH_SIZE = 50;        // Log telemetry every N records
+const THROTTLE_DELAY_MS = 200;         // Delay after every THROTTLE_BATCH_SIZE records
+const RATE_LIMIT_RETRY_MS = 2000;      // 2-second sleep on rate limit
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+
+// Telemetry State
+interface TelemetryState {
+  startTime: number;
+  recordsProcessed: number;
+  peakRssMb: number;
+  lastEncryptMs: number;
+  totalUpsertMs: number;
+  upsertCount: number;
+}
 
 // Intelligent Decline Branching: Categorize Stripe decline codes
 // Soft codes: temporary issues that may resolve (retry-friendly)
@@ -67,6 +80,38 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function getRssMb(): number {
+  const usage = process.memoryUsage();
+  return Math.round(usage.rss / (1024 * 1024) * 10) / 10;
+}
+
+function logTelemetryHeartbeat(telemetry: TelemetryState): void {
+  const elapsed = Date.now() - telemetry.startTime;
+  const avgUpsertMs = telemetry.upsertCount > 0 
+    ? Math.round(telemetry.totalUpsertMs / telemetry.upsertCount * 100) / 100 
+    : 0;
+  
+  console.log(
+    `[PHANTOM-CORE] Index: ${telemetry.recordsProcessed} | ` +
+    `RAM: ${getRssMb()}MB | ` +
+    `Encrypt: ${telemetry.lastEncryptMs}ms | ` +
+    `Avg UPSERT: ${avgUpsertMs}ms | ` +
+    `Elapsed: ${elapsed}ms`
+  );
+  
+  // Update peak RSS
+  const currentRss = getRssMb();
+  if (currentRss > telemetry.peakRssMb) {
+    telemetry.peakRssMb = currentRss;
+  }
+}
+
+function isStripeRateLimitError(error: any): boolean {
+  return error?.statusCode === 429 || 
+         error?.type === 'StripeRateLimitError' ||
+         error?.code === 'rate_limit';
+}
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries: number = MAX_RETRIES,
@@ -75,9 +120,9 @@ async function withRetry<T>(
   try {
     return await fn();
   } catch (error: any) {
-    if (retries > 0 && error?.statusCode === 429) {
-      console.log(`[GHOST HUNTER] Rate limited, retrying in ${backoff}ms...`);
-      await delay(backoff);
+    if (retries > 0 && isStripeRateLimitError(error)) {
+      console.log(`[GHOST HUNTER] StripeRateLimitError detected, sleeping ${RATE_LIMIT_RETRY_MS}ms before retry...`);
+      await delay(RATE_LIMIT_RETRY_MS);
       return withRetry(fn, retries - 1, backoff * 2);
     }
     throw error;
@@ -127,8 +172,8 @@ function extractPaymentTimingData(invoice: Stripe.Invoice): { dayOfWeek: number;
   };
 }
 
-export async function scanMerchant(merchantId: string): Promise<ScanResult> {
-  const result: ScanResult = {
+export async function scanMerchant(merchantId: string): Promise<ScanResult & { telemetry?: TelemetryState }> {
+  const result: ScanResult & { telemetry?: TelemetryState } = {
     merchantId,
     ghostsFound: [],
     oracleDataPoints: 0,
@@ -136,11 +181,39 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
     errors: [],
   };
 
+  // Initialize telemetry state
+  const telemetry: TelemetryState = {
+    startTime: Date.now(),
+    recordsProcessed: 0,
+    peakRssMb: getRssMb(),
+    lastEncryptMs: 0,
+    totalUpsertMs: 0,
+    upsertCount: 0,
+  };
+
   console.log(`[GHOST HUNTER] Starting DEEP HARVEST scan for merchant: ${merchantId}`);
+  console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
+  console.log(`[PHANTOM-CORE] DIAGNOSTIC SHELL ACTIVE`);
+  console.log(`[PHANTOM-CORE] Throttle: ${THROTTLE_DELAY_MS}ms every ${THROTTLE_BATCH_SIZE} records`);
+  console.log(`[PHANTOM-CORE] Rate Limit Retry: ${RATE_LIMIT_RETRY_MS}ms`);
+  console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
+
+  // PRE-FLIGHT VAULT INTEGRITY CHECK
+  try {
+    const vaultCheck = vaultDiagnostic();
+    telemetry.lastEncryptMs = vaultCheck.encryptMs;
+    console.log(`[PHANTOM-CORE] Vault Pre-Flight: PASS | Encrypt: ${vaultCheck.encryptMs}ms | Decrypt: ${vaultCheck.decryptMs}ms`);
+  } catch (error: any) {
+    console.error(`[PHANTOM-CORE] CRITICAL_VAULT_ERROR: ${error.message}`);
+    result.errors.push(error.message);
+    result.telemetry = telemetry;
+    return result;
+  }
 
   const merchant = await storage.getMerchant(merchantId);
   if (!merchant) {
     result.errors.push("Merchant not found");
+    result.telemetry = telemetry;
     return result;
   }
 
@@ -207,6 +280,13 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
       // Process each invoice in this batch immediately (memory-safe)
       for (const invoice of invoices.data) {
         totalInvoicesScanned++;
+        telemetry.recordsProcessed++;
+
+        // THROTTLE: Delay every THROTTLE_BATCH_SIZE records
+        if (telemetry.recordsProcessed % THROTTLE_BATCH_SIZE === 0) {
+          await delay(THROTTLE_DELAY_MS);
+          logTelemetryHeartbeat(telemetry);
+        }
 
         // STRICT EXCLUSION: void status invoices are never processed
         // Only open or uncollectible invoices qualify for Ghost detection
@@ -216,8 +296,6 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
             : invoice.customer?.id;
 
           if (customerId) {
-            await delay(RATE_LIMIT_DELAY_MS);
-            
             // Dead Ghost Filter: only process if customer has active/past_due subscription
             const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
 
@@ -253,7 +331,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
-              // UPSERT on invoiceId prevents duplicates (PII encrypted before storage)
+              // UPSERT with latency tracking
+              const upsertStart = Date.now();
               await storage.upsertGhostTarget({
                 merchantId,
                 email,
@@ -265,6 +344,9 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
                 failureReason,
                 declineType,
               });
+              const upsertMs = Date.now() - upsertStart;
+              telemetry.totalUpsertMs += upsertMs;
+              telemetry.upsertCount++;
 
               result.ghostsFound.push({
                 email,
@@ -285,7 +367,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
                 remainingCapacity--;
               }
 
-              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'}`);
+              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
             }
           }
         } else if (invoice.status === "paid") {
@@ -311,6 +393,12 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
           }
         }
         // Note: "void" and "draft" status invoices are strictly excluded (not counted as leaked revenue)
+        
+        // Update peak RSS memory
+        const currentRss = getRssMb();
+        if (currentRss > telemetry.peakRssMb) {
+          telemetry.peakRssMb = currentRss;
+        }
       }
       // Batch processed - memory released for this batch
 
@@ -318,7 +406,6 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
       hasMore = invoices.has_more;
       if (hasMore && invoices.data.length > 0) {
         startingAfter = invoices.data[invoices.data.length - 1].id;
-        await delay(RATE_LIMIT_DELAY_MS); // Rate limit between pagination calls
       }
 
     } catch (error: any) {
@@ -348,7 +435,21 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
     console.log(`[GHOST HUNTER] Skipping Shadow Revenue update due to scan errors`);
   }
 
+  // DIAGNOSTIC SHELL: Final telemetry summary
+  const totalDurationMs = Date.now() - telemetry.startTime;
+  const avgUpsertMs = telemetry.upsertCount > 0 
+    ? Math.round(telemetry.totalUpsertMs / telemetry.upsertCount * 100) / 100 
+    : 0;
+
   // Summary logging
+  console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
+  console.log(`[PHANTOM-CORE] DIAGNOSTIC SUMMARY`);
+  console.log(`[PHANTOM-CORE] Total Records: ${telemetry.recordsProcessed}`);
+  console.log(`[PHANTOM-CORE] Total Duration: ${totalDurationMs}ms`);
+  console.log(`[PHANTOM-CORE] Peak RSS Memory: ${telemetry.peakRssMb}MB`);
+  console.log(`[PHANTOM-CORE] Avg UPSERT Latency: ${avgUpsertMs}ms (${telemetry.upsertCount} operations)`);
+  console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
+  
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
   console.log(`[GHOST HUNTER] DEEP HARVEST COMPLETE for merchant: ${merchantId}`);
   console.log(`[GHOST HUNTER] Total invoices scanned: ${totalInvoicesScanned}`);
@@ -358,6 +459,9 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult> {
   console.log(`[GHOST HUNTER] Shadow Revenue (all-time): $${(shadowRevenueTally / 100).toFixed(2)}`);
   console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
+
+  // Attach telemetry to result
+  result.telemetry = telemetry;
 
   return result;
 }

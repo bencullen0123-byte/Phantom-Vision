@@ -85,3 +85,41 @@ export function runSecurityCheck(): void {
     process.exit(1);
   }
 }
+
+/**
+ * VaultDiagnostic: Pre-flight integrity check for Ghost Hunter
+ * Encrypts/decrypts a known test string and measures timing
+ * @returns Object with success status and encryption timing in ms
+ * @throws Error with CRITICAL_VAULT_ERROR if integrity check fails
+ */
+export function vaultDiagnostic(): { success: boolean; encryptMs: number; decryptMs: number } {
+  const testString = "PHANTOM_INTEGRITY_TEST";
+  
+  const encryptStart = performance.now();
+  let encrypted: EncryptionResult;
+  try {
+    encrypted = encrypt(testString);
+  } catch (error: any) {
+    throw new Error(`CRITICAL_VAULT_ERROR: Encryption failed - ${error.message}`);
+  }
+  const encryptMs = performance.now() - encryptStart;
+  
+  const decryptStart = performance.now();
+  let decrypted: string;
+  try {
+    decrypted = decrypt(encrypted.encryptedData, encrypted.iv, encrypted.tag);
+  } catch (error: any) {
+    throw new Error(`CRITICAL_VAULT_ERROR: Decryption failed - ${error.message}`);
+  }
+  const decryptMs = performance.now() - decryptStart;
+  
+  if (decrypted !== testString) {
+    throw new Error(`CRITICAL_VAULT_ERROR: Integrity mismatch - decrypted value does not match original`);
+  }
+  
+  return {
+    success: true,
+    encryptMs: Math.round(encryptMs * 100) / 100,
+    decryptMs: Math.round(decryptMs * 100) / 100,
+  };
+}
