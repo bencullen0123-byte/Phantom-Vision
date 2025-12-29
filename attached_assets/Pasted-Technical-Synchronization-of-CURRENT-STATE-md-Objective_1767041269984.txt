@@ -1,0 +1,44 @@
+Technical Synchronization of CURRENT_STATE.md
+Objective: Perform a comprehensive audit of the codebase and update CURRENT_STATE.md into a high-density, functional technical manifest. This document must serve as the authoritative reference for the next phase of engineering.
+
+Parameters:
+
+Zero Marketing Fluff: Remove all conceptual or aspirational language. Focus exclusively on implemented logic, data schemas, and architectural patterns.
+
+Functional Granularity: Document the exact "as-built" state, not the "planned" state.
+
+Required Sections & Technical Details:
+
+1. Forensic Data Schema (PostgreSQL):
+
+Document the current structure of merchants, ghost_targets, and system_logs.
+
+Explicitly define the relationships and foreign key constraints between these tables.
+
+Document the recoveryType enum (Direct vs. Organic) and how it’s currently calculated.
+
+2. Security & Identity Infrastructure:
+
+Document the requireMerchant middleware logic and how it binds the session to req.merchantId.
+
+Detail the AES-256-GCM encryption/decryption flow for PII in storage.ts.
+
+Confirm the current Stripe Connect OAuth state and how stripe_account_id is stored and retrieved.
+
+3. API & Intelligence Logic:
+
+Temporal Aggregators: Document the logic behind the monthlyTrend and dailyPulse aggregators, including the specific DATE_TRUNC intervals used in storage.ts.
+
+Intelligence Logs: Describe how the system synthesizes ghost_targets data into "Strategic Reasoning" strings (Intelligent Hold, Immediate Outreach, etc.).
+
+4. UI Architectural Patterns (Obsidian/Slate):
+
+The Forensic Grid: Document the layout of the Dashboard Hero and the dual-mode Recharts implementation.
+
+The Ledger: Document the DataTable configuration, including current sorting, filtering, and the 24h attribution window display.
+
+Layout Integrity: Document the fixed-height skeleton strategy and the #0A0A0A/Slate/Emerald color tokens.
+
+5. Connectivity & Routes:
+
+Map all current Express routes to their corresponding frontend views and the middleware that protects them.
