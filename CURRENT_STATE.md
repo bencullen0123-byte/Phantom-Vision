@@ -380,7 +380,64 @@ Fixed height container: `h-[200px]`
 
 ---
 
-## 7. Environment Variables
+## 7. Diagnostic Shell (Performance Validation)
+
+Location: `server/services/ghostHunter.ts`
+
+### Pre-Flight Vault Check
+Before any Stripe API calls, the diagnostic shell validates encryption integrity:
+```typescript
+vaultDiagnostic()
+// Encrypts/decrypts "PHANTOM_INTEGRITY_TEST"
+// Throws CRITICAL_VAULT_ERROR if mismatch
+// Returns { encryptMs, decryptMs } timing data
+```
+
+### Throttling Strategy
+Changed from per-call delays to batch-based throttling for better performance:
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `THROTTLE_BATCH_SIZE` | 50 | Process N records before delay |
+| `THROTTLE_DELAY_MS` | 200ms | Pause duration after batch |
+| `RATE_LIMIT_RETRY_MS` | 2000ms | Sleep on StripeRateLimitError |
+
+### Rate Limit Detection
+Enhanced detection for Stripe rate limiting:
+```typescript
+isStripeRateLimitError(error)
+// Checks: statusCode === 429
+// Checks: type === 'StripeRateLimitError'
+// Checks: code === 'rate_limit'
+```
+
+### Telemetry State
+Real-time performance monitoring during scan:
+```typescript
+interface TelemetryState {
+  startTime: number;      // Scan start timestamp
+  recordsProcessed: number; // Invoice counter
+  peakRssMb: number;      // Peak memory usage
+  lastEncryptMs: number;  // Latest encrypt timing
+  totalUpsertMs: number;  // Cumulative DB latency
+  upsertCount: number;    // UPSERT operation count
+}
+```
+
+### Heartbeat Logging
+Every 50 records, telemetry logs:
+```
+[PHANTOM-CORE] Index: 50 | RAM: 142.3MB | Encrypt: 1ms | Avg UPSERT: 12.5ms | Elapsed: 5420ms
+```
+
+### Final Summary (system_logs)
+On completion, writes to `system_logs` table:
+```
+Scanned 3 merchants, 1500 records, found 12 ghosts in 45000ms | Peak RSS: 156.2MB | Avg UPSERT: 11.3ms
+```
+
+---
+
+## 8. Environment Variables
 
 | Variable | Purpose |
 |----------|---------|

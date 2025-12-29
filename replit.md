@@ -101,3 +101,10 @@ shared/          # Shared types and schema
   - `GET /api/system/health` - View scheduler status and logs
   - `POST /api/sentinel/ghost-hunter` - Manual trigger
   - `POST /api/sentinel/pulse-engine` - Manual trigger
+
+### Diagnostic Shell (Performance Validation)
+- **Pre-Flight Vault Check:** Encrypts/decrypts "PHANTOM_INTEGRITY_TEST" before Stripe API calls
+- **Throttling Strategy:** 200ms delay every 50 records (vs 100ms per call)
+- **Rate Limit Detection:** Checks statusCode 429, StripeRateLimitError type, rate_limit code
+- **Telemetry Heartbeat:** Logs every 50 records - index, RSS memory, encrypt timing, avg UPSERT latency
+- **Final Summary:** Writes to system_logs with total records, duration, peak RSS, avg UPSERT latency
