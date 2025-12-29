@@ -152,7 +152,7 @@ function DashboardMetrics() {
             className="font-mono text-3xl text-emerald-500"
             data-testid="text-recovered-total"
           >
-            {formatCurrency(merchant.totalRecoveredCents)}
+            {formatCurrency(merchant.lifetime.totalRecoveredCents)}
           </p>
         </div>
 
@@ -162,7 +162,7 @@ function DashboardMetrics() {
             className="font-mono text-3xl text-slate-400"
             data-testid="text-leaked-total"
           >
-            {formatCurrency(merchant.allTimeLeakedCents)}
+            {formatCurrency(merchant.lifetime.allTimeLeakedCents)}
           </p>
         </div>
 
@@ -172,7 +172,7 @@ function DashboardMetrics() {
             className="font-mono text-3xl text-white"
             data-testid="text-ghost-count"
           >
-            {merchant.totalGhostCount}
+            {merchant.lifetime.totalGhostCount}
           </p>
         </div>
       </div>
