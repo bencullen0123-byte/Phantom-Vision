@@ -1,9 +1,11 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Shield } from "lucide-react";
+import { Loader2, Search, Shield, TrendingDown, TrendingUp } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import MonthlyTrendChart from "@/components/charts/MonthlyTrendChart";
+import DailyPulseChart from "@/components/charts/DailyPulseChart";
 
 function ConnectStripeGate() {
   return (
@@ -113,7 +115,7 @@ function DeepHarvestGate() {
   );
 }
 
-function DashboardMetrics() {
+function MoneyHero() {
   const { merchant } = useMerchant();
 
   if (!merchant) return null;
@@ -122,6 +124,8 @@ function DashboardMetrics() {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency: "GBP",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(cents / 100);
   };
 
@@ -137,45 +141,106 @@ function DashboardMetrics() {
   };
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold text-white mb-2">Revenue Intelligence</h1>
-        <p className="text-slate-400">
-          Last audit: <span className="font-mono">{formatDate(merchant.lastAuditAt)}</span>
+    <div className="space-y-6">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap">
+        <h1 className="text-2xl font-semibold text-white">Revenue Intelligence</h1>
+        <p className="text-slate-500 text-sm">
+          Last audit: <span className="font-mono text-slate-400">{formatDate(merchant.lastAuditAt)}</span>
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-slate-900 border border-white/10 rounded-md p-6">
-          <p className="text-slate-400 text-sm mb-2">Recovered Revenue</p>
-          <p 
-            className="font-mono text-3xl text-emerald-500"
-            data-testid="text-recovered-total"
-          >
-            {formatCurrency(merchant.lifetime.totalRecoveredCents)}
+      <div className="h-[200px] flex flex-col items-center justify-center text-center space-y-4">
+        <div>
+          <p className="text-slate-500 text-sm mb-2 flex items-center justify-center gap-2">
+            <TrendingDown className="w-4 h-4" />
+            Money Left on the Table
           </p>
-        </div>
-
-        <div className="bg-slate-900 border border-white/10 rounded-md p-6">
-          <p className="text-slate-400 text-sm mb-2">Shadow Revenue (Leaked)</p>
           <p 
-            className="font-mono text-3xl text-slate-400"
-            data-testid="text-leaked-total"
+            className="text-5xl md:text-6xl lg:text-7xl text-slate-400"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-leaked-hero"
           >
             {formatCurrency(merchant.lifetime.allTimeLeakedCents)}
           </p>
         </div>
 
-        <div className="bg-slate-900 border border-white/10 rounded-md p-6">
-          <p className="text-slate-400 text-sm mb-2">Ghost Users Detected</p>
+        <div className="pt-4">
+          <p className="text-slate-500 text-sm mb-2 flex items-center justify-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            Recovered by PHANTOM
+          </p>
           <p 
-            className="font-mono text-3xl text-white"
+            className="text-3xl md:text-4xl text-emerald-500"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-recovered-hero"
+          >
+            {formatCurrency(merchant.lifetime.totalRecoveredCents)}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-center gap-8 text-sm border-t border-white/5 pt-6">
+        <div className="text-center">
+          <p className="text-slate-500">Ghost Users</p>
+          <p 
+            className="text-xl text-white"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-ghost-count"
           >
             {merchant.lifetime.totalGhostCount}
           </p>
         </div>
+        <div className="text-center">
+          <p className="text-slate-500">Tier Limit</p>
+          <p 
+            className="text-xl text-white"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+          >
+            {merchant.tierLimit}
+          </p>
+        </div>
+        <div className="text-center">
+          <p className="text-slate-500">Strategy</p>
+          <p className="text-xl text-white capitalize">
+            {merchant.recoveryStrategy}
+          </p>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ForensicCharts() {
+  const { merchant } = useMerchant();
+
+  if (!merchant) return null;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="bg-slate-900/50 border border-white/5 rounded-md p-6">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <h3 className="text-sm font-medium text-slate-300">Historical Trend</h3>
+          <span className="text-xs text-slate-500">Monthly breakdown</span>
+        </div>
+        <MonthlyTrendChart data={merchant.monthlyTrend} />
+      </div>
+
+      <div className="bg-slate-900/50 border border-white/5 rounded-md p-6">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <h3 className="text-sm font-medium text-slate-300">30-Day Velocity</h3>
+          <span className="text-xs text-slate-500">Daily activity</span>
+        </div>
+        <DailyPulseChart data={merchant.dailyPulse} />
+      </div>
+    </div>
+  );
+}
+
+function DashboardMetrics() {
+  return (
+    <div className="space-y-8">
+      <MoneyHero />
+      <ForensicCharts />
     </div>
   );
 }
