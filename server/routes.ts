@@ -386,7 +386,7 @@ export async function registerRoutes(
     }
   });
 
-  // Merchant Stats API - returns recovery dashboard data (secured by session)
+  // Merchant Stats API - returns Historical Revenue Intelligence (secured by session)
   app.get("/api/merchant/stats", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
@@ -399,25 +399,16 @@ export async function registerRoutes(
     }
 
     try {
-      const stats = await storage.getMerchantStats(merchantId);
+      const historicalStats = await storage.getHistoricalRevenueStats(merchantId);
 
       return res.json({
-        status: "success",
         id: merchant.id,
-        merchant_id: merchant.stripeUserId,
         lastAuditAt: merchant.lastAuditAt,
-        totalRecoveredCents: merchant.totalRecoveredCents,
-        allTimeLeakedCents: merchant.allTimeLeakedCents,
-        totalGhostCount: merchant.totalGhostCount,
         tierLimit: merchant.tierLimit,
         recoveryStrategy: merchant.recoveryStrategy,
-        total_ghosts_found: stats.totalGhostsFound,
-        active_ghosts: stats.activeGhosts,
-        recovered_count: stats.recoveredCount,
-        revenue_recovered_cents: stats.totalRecoveredCents,
-        revenue_recovered_formatted: `$${(stats.totalRecoveredCents / 100).toFixed(2)}`,
-        recovery_rate: stats.recoveryRate,
-        recovery_rate_formatted: `${stats.recoveryRate.toFixed(2)}%`
+        lifetime: historicalStats.lifetime,
+        monthlyTrend: historicalStats.monthlyTrend,
+        dailyPulse: historicalStats.dailyPulse,
       });
     } catch (error: any) {
       console.error("[STATS] Failed to get merchant stats:", error);

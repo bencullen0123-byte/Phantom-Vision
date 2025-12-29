@@ -11,6 +11,28 @@ export interface MerchantStats {
   recoveryRate: number;
 }
 
+export interface MonthlyTrendPoint {
+  month: string; // YYYY-MM
+  leaked: number;
+  recovered: number;
+}
+
+export interface DailyPulsePoint {
+  date: string; // YYYY-MM-DD
+  leaked: number;
+  recovered: number;
+}
+
+export interface HistoricalRevenueStats {
+  lifetime: {
+    allTimeLeakedCents: number;
+    totalGhostCount: number;
+    totalRecoveredCents: number;
+  };
+  monthlyTrend: MonthlyTrendPoint[];
+  dailyPulse: DailyPulsePoint[];
+}
+
 export interface ShadowRevenueUpdate {
   allTimeLeakedCents: number;
   totalGhostCount: number;
@@ -114,6 +136,9 @@ export interface IStorage {
   incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>;
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
   updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
+  getHistoricalRevenueStats(merchantId: string): Promise<HistoricalRevenueStats>;
+  getMonthlyTrend(merchantId: string): Promise<MonthlyTrendPoint[]>;
+  getDailyPulse(merchantId: string): Promise<DailyPulsePoint[]>;
   
   // Ghost Targets
   getGhostTarget(id: string): Promise<GhostTarget | undefined>;
@@ -221,6 +246,64 @@ export class DatabaseStorage implements IStorage {
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async getMonthlyTrend(merchantId: string): Promise<MonthlyTrendPoint[]> {
+    const results = await db.execute(sql`
+      SELECT 
+        TO_CHAR(DATE_TRUNC('month', discovered_at), 'YYYY-MM') AS month,
+        COALESCE(SUM(CASE WHEN status IN ('pending', 'exhausted') THEN amount ELSE 0 END), 0)::bigint AS leaked,
+        COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS recovered
+      FROM ghost_targets
+      WHERE merchant_id = ${merchantId}
+      GROUP BY DATE_TRUNC('month', discovered_at)
+      ORDER BY month ASC
+    `);
+    
+    return (results.rows as any[]).map(row => ({
+      month: row.month as string,
+      leaked: Number(row.leaked),
+      recovered: Number(row.recovered),
+    }));
+  }
+
+  async getDailyPulse(merchantId: string): Promise<DailyPulsePoint[]> {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const results = await db.execute(sql`
+      SELECT 
+        TO_CHAR(DATE_TRUNC('day', discovered_at), 'YYYY-MM-DD') AS date,
+        COALESCE(SUM(CASE WHEN status IN ('pending', 'exhausted') THEN amount ELSE 0 END), 0)::bigint AS leaked,
+        COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS recovered
+      FROM ghost_targets
+      WHERE merchant_id = ${merchantId}
+        AND discovered_at >= ${thirtyDaysAgo}
+      GROUP BY DATE_TRUNC('day', discovered_at)
+      ORDER BY date ASC
+    `);
+    
+    return (results.rows as any[]).map(row => ({
+      date: row.date as string,
+      leaked: Number(row.leaked),
+      recovered: Number(row.recovered),
+    }));
+  }
+
+  async getHistoricalRevenueStats(merchantId: string): Promise<HistoricalRevenueStats> {
+    const merchant = await this.getMerchant(merchantId);
+    const monthlyTrend = await this.getMonthlyTrend(merchantId);
+    const dailyPulse = await this.getDailyPulse(merchantId);
+    
+    return {
+      lifetime: {
+        allTimeLeakedCents: Number(merchant?.allTimeLeakedCents || 0),
+        totalGhostCount: merchant?.totalGhostCount || 0,
+        totalRecoveredCents: Number(merchant?.totalRecoveredCents || 0),
+      },
+      monthlyTrend,
+      dailyPulse,
+    };
   }
 
   // Ghost Targets (with AES-256-GCM encryption for PII)

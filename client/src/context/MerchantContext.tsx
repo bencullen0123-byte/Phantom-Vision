@@ -1,14 +1,32 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+interface MonthlyTrendPoint {
+  month: string;
+  leaked: number;
+  recovered: number;
+}
+
+interface DailyPulsePoint {
+  date: string;
+  leaked: number;
+  recovered: number;
+}
+
+interface LifetimeStats {
+  allTimeLeakedCents: number;
+  totalGhostCount: number;
+  totalRecoveredCents: number;
+}
+
 interface MerchantStats {
   id: string;
   lastAuditAt: string | null;
-  totalRecoveredCents: number;
-  allTimeLeakedCents: number;
-  totalGhostCount: number;
   tierLimit: number;
   recoveryStrategy: string;
+  lifetime: LifetimeStats;
+  monthlyTrend: MonthlyTrendPoint[];
+  dailyPulse: DailyPulsePoint[];
 }
 
 interface AuthStatus {
@@ -63,3 +81,5 @@ export function useMerchant() {
   }
   return context;
 }
+
+export type { MerchantStats, LifetimeStats, MonthlyTrendPoint, DailyPulsePoint };
