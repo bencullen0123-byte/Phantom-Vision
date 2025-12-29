@@ -1,8 +1,11 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import cookieParser from "cookie-parser";
+import connectPgSimple from "connect-pg-simple";
+import { Pool } from "pg";
 
 const app = express();
 const httpServer = createServer(app);
@@ -13,8 +16,48 @@ declare module "http" {
   }
 }
 
+declare module "express-session" {
+  interface SessionData {
+    merchantId?: string;
+  }
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      merchantId?: string;
+    }
+  }
+}
+
 // Cookie parser for OAuth state validation
 app.use(cookieParser());
+
+// Session configuration with PostgreSQL store
+const PgSession = connectPgSimple(session);
+const sessionPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+app.use(
+  session({
+    store: new PgSession({
+      pool: sessionPool,
+      tableName: "session",
+      createTableIfMissing: true,
+    }),
+    secret: process.env.SESSION_SECRET || "phantom-dev-secret-change-in-prod",
+    resave: false,
+    saveUninitialized: false,
+    name: "phantom.sid",
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    },
+  })
+);
 
 app.use(
   express.json({

@@ -1,13 +1,28 @@
 import { useMerchant } from "@/context/MerchantContext";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Loader2 } from "lucide-react";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
 
 export default function GrowthPage() {
-  const { merchant, isLoading } = useMerchant();
+  const { merchant, isLoading, isAuthenticated, authLoading } = useMerchant();
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <div className="py-16 text-center">
-        <p className="text-slate-400">Loading...</p>
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400 mx-auto" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-slate-400 mb-4">Please connect your Stripe account to view growth metrics.</p>
+        <Link href="/">
+          <Button variant="outline" className="border-white/10" data-testid="link-dashboard">
+            Go to Dashboard
+          </Button>
+        </Link>
       </div>
     );
   }

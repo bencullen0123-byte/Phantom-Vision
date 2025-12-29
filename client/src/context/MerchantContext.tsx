@@ -11,9 +11,16 @@ interface MerchantStats {
   recoveryStrategy: string;
 }
 
+interface AuthStatus {
+  authenticated: boolean;
+  merchantId?: string;
+}
+
 interface MerchantContextType {
   merchant: MerchantStats | null;
   isLoading: boolean;
+  isAuthenticated: boolean;
+  authLoading: boolean;
   error: Error | null;
   refetch: () => void;
 }
@@ -21,17 +28,27 @@ interface MerchantContextType {
 const MerchantContext = createContext<MerchantContextType | undefined>(undefined);
 
 export function MerchantProvider({ children }: { children: ReactNode }) {
-  const { data, isLoading, error, refetch } = useQuery<MerchantStats>({
-    queryKey: ["/api/merchant/stats"],
+  const authQuery = useQuery<AuthStatus>({
+    queryKey: ["/api/auth/status"],
   });
+
+  const statsQuery = useQuery<MerchantStats>({
+    queryKey: ["/api/merchant/stats"],
+    enabled: authQuery.data?.authenticated === true,
+  });
+
+  const isAuthenticated = authQuery.data?.authenticated === true;
+  const authLoading = authQuery.isLoading;
 
   return (
     <MerchantContext.Provider
       value={{
-        merchant: data ?? null,
-        isLoading,
-        error: error as Error | null,
-        refetch,
+        merchant: statsQuery.data ?? null,
+        isLoading: statsQuery.isLoading,
+        isAuthenticated,
+        authLoading,
+        error: statsQuery.error as Error | null,
+        refetch: statsQuery.refetch,
       }}
     >
       {children}

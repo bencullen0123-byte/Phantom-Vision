@@ -1,8 +1,67 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { Button } from "@/components/ui/button";
 import { Loader2, Search, Shield } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+function ConnectStripeGate() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="bg-slate-900 border border-white/10 rounded-md p-12 max-w-xl">
+        <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-indigo-600/20 flex items-center justify-center">
+          <Shield className="w-8 h-8 text-indigo-400" />
+        </div>
+        
+        <h2 className="text-2xl font-semibold text-white mb-4">
+          Connect Your Stripe Account
+        </h2>
+        
+        <p className="text-slate-400 mb-6 leading-relaxed">
+          PHANTOM needs access to your Stripe account to identify Ghost Users—customers 
+          with active subscriptions but failed payments. Your data is encrypted with 
+          AES-256-GCM and never leaves PHANTOM.
+        </p>
+
+        <Button 
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 h-auto text-base font-medium"
+          onClick={() => window.location.href = "/api/auth/stripe"}
+          data-testid="button-connect-stripe"
+        >
+          <Shield className="w-4 h-4 mr-2" />
+          Connect Stripe
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function DeepHarvestGate() {
+  const { toast } = useToast();
+  const { refetch } = useMerchant();
+
+  const auditMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/audit/run");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Deep Harvest Complete",
+        description: `Found ${data.total_ghosts_found} ghost users with ${data.total_revenue_at_risk_formatted} at risk.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Audit Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="bg-slate-900 border border-white/10 rounded-md p-12 max-w-xl">
@@ -23,10 +82,21 @@ function DeepHarvestGate() {
         <div className="space-y-4">
           <Button 
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 h-auto text-base font-medium"
+            onClick={() => auditMutation.mutate()}
+            disabled={auditMutation.isPending}
             data-testid="button-initiate-harvest"
           >
-            <Search className="w-4 h-4 mr-2" />
-            Initiate Deep Harvest
+            {auditMutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Scanning...
+              </>
+            ) : (
+              <>
+                <Search className="w-4 h-4 mr-2" />
+                Initiate Deep Harvest
+              </>
+            )}
           </Button>
           
           <p className="text-xs text-slate-500">
@@ -111,9 +181,9 @@ function DashboardMetrics() {
 }
 
 export default function DashboardPage() {
-  const { merchant, isLoading, error } = useMerchant();
+  const { merchant, isLoading, isAuthenticated, authLoading } = useMerchant();
 
-  if (isLoading) {
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
@@ -121,17 +191,14 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (!isAuthenticated) {
+    return <ConnectStripeGate />;
+  }
+
+  if (isLoading) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-slate-400">Unable to load merchant data. Please connect your Stripe account.</p>
-        <Button 
-          className="mt-4 bg-indigo-600 hover:bg-indigo-700"
-          onClick={() => window.location.href = "/api/auth/stripe"}
-          data-testid="button-connect-stripe"
-        >
-          Connect Stripe
-        </Button>
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
       </div>
     );
   }

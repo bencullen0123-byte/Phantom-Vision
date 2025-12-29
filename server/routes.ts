@@ -6,6 +6,7 @@ import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
+import { requireMerchant } from "./middleware/auth";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 
@@ -84,6 +85,22 @@ export async function registerRoutes(
       stage: "titanium-gate",
       stripeConfigured: stripeConfigured,
       vaultActive: vaultActive
+    });
+  });
+
+  // Auth status endpoint - checks if user has active session
+  app.get("/api/auth/status", (req: Request, res: Response) => {
+    const merchantId = req.session?.merchantId;
+    
+    if (merchantId) {
+      return res.json({
+        authenticated: true,
+        merchantId
+      });
+    }
+    
+    return res.json({
+      authenticated: false
     });
   });
 
@@ -212,14 +229,20 @@ export async function registerRoutes(
       
       if (existingMerchant) {
         console.log("[AUTH] Merchant already authorized:", stripe_user_id);
-        return res.redirect(`/api/auth/success?merchant_id=${encodeURIComponent(stripe_user_id)}`);
+        req.session.merchantId = existingMerchant.id;
+        return req.session.save((err) => {
+          if (err) {
+            console.error("[AUTH] Session save error:", err);
+          }
+          res.redirect("/");
+        });
       }
 
       // Encrypt the access token using the Vault
       const { encryptedData, iv, tag } = encrypt(access_token);
 
       // Store encrypted token in database
-      await storage.createMerchant({
+      const newMerchant = await storage.createMerchant({
         stripeUserId: stripe_user_id,
         encryptedToken: encryptedData,
         iv: iv,
@@ -228,7 +251,13 @@ export async function registerRoutes(
 
       console.log("[AUTH] New merchant authorized and stored:", stripe_user_id);
       
-      res.redirect(`/api/auth/success?merchant_id=${encodeURIComponent(stripe_user_id)}`);
+      req.session.merchantId = newMerchant.id;
+      req.session.save((err) => {
+        if (err) {
+          console.error("[AUTH] Session save error:", err);
+        }
+        res.redirect("/");
+      });
 
     } catch (err: any) {
       console.error("[AUTH] Token exchange failed:", err);
@@ -238,54 +267,11 @@ export async function registerRoutes(
     }
   });
 
-  // Audit endpoint - runs ghost scan for a merchant
-  app.get("/api/audit/run", async (req: Request, res: Response) => {
-    const { merchant_id } = req.query;
-
-    if (!merchant_id || typeof merchant_id !== "string") {
-      // If no merchant_id provided, try to get the first connected merchant
-      const merchants = await storage.getAllMerchants();
-      
-      if (merchants.length === 0) {
-        return res.status(400).json({
-          status: "error",
-          message: "No connected merchants found. Please connect a Stripe account first."
-        });
-      }
-
-      // Use the first merchant for now
-      const targetMerchant = merchants[0];
-      console.log(`[AUDIT] Running audit for merchant: ${targetMerchant.id}`);
-
-      try {
-        const result = await runAuditForMerchant(targetMerchant.id);
-        
-        if (result.errors.length > 0) {
-          console.error("[AUDIT] Errors during scan:", result.errors);
-        }
-
-        return res.json({
-          status: "success",
-          merchant_id: targetMerchant.stripeUserId,
-          total_ghosts_found: result.total_ghosts_found,
-          total_revenue_at_risk: result.total_revenue_at_risk,
-          total_revenue_at_risk_formatted: `$${(result.total_revenue_at_risk / 100).toFixed(2)}`,
-          oracle_data_points: result.oracle_data_points,
-          errors: result.errors
-        });
-      } catch (error: any) {
-        console.error("[AUDIT] Scan failed:", error);
-        return res.status(500).json({
-          status: "error",
-          message: "Audit scan failed",
-          error: error.message
-        });
-      }
-    }
-
-    // If merchant_id is provided, look up by internal ID
-    const merchant = await storage.getMerchant(merchant_id);
+  // Audit endpoint - runs ghost scan for a merchant (secured by session)
+  app.post("/api/audit/run", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
     
+    const merchant = await storage.getMerchant(merchantId);
     if (!merchant) {
       return res.status(404).json({
         status: "error",
@@ -400,28 +386,11 @@ export async function registerRoutes(
     }
   });
 
-  // Merchant Stats API - returns recovery dashboard data
-  app.get("/api/merchant/stats", async (req: Request, res: Response) => {
-    const { merchant_id } = req.query;
+  // Merchant Stats API - returns recovery dashboard data (secured by session)
+  app.get("/api/merchant/stats", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
 
-    let targetMerchantId: string;
-
-    if (!merchant_id || typeof merchant_id !== "string") {
-      const merchants = await storage.getAllMerchants();
-      
-      if (merchants.length === 0) {
-        return res.status(400).json({
-          status: "error",
-          message: "No connected merchants found"
-        });
-      }
-
-      targetMerchantId = merchants[0].id;
-    } else {
-      targetMerchantId = merchant_id;
-    }
-
-    const merchant = await storage.getMerchant(targetMerchantId);
+    const merchant = await storage.getMerchant(merchantId);
     if (!merchant) {
       return res.status(404).json({
         status: "error",
@@ -430,11 +399,18 @@ export async function registerRoutes(
     }
 
     try {
-      const stats = await storage.getMerchantStats(targetMerchantId);
+      const stats = await storage.getMerchantStats(merchantId);
 
       return res.json({
         status: "success",
+        id: merchant.id,
         merchant_id: merchant.stripeUserId,
+        lastAuditAt: merchant.lastAuditAt,
+        totalRecoveredCents: merchant.totalRecoveredCents,
+        allTimeLeakedCents: merchant.allTimeLeakedCents,
+        totalGhostCount: merchant.totalGhostCount,
+        tierLimit: merchant.tierLimit,
+        recoveryStrategy: merchant.recoveryStrategy,
         total_ghosts_found: stats.totalGhostsFound,
         active_ghosts: stats.activeGhosts,
         recovered_count: stats.recoveredCount,
