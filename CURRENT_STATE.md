@@ -90,16 +90,29 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 - [x] Pre-scan gate check (abort scan if at tier limit)
 - [x] Mid-scan overflow rule (stop ingesting new ghosts but complete current batch)
 
+### Task 0.4: Session-to-Merchant Security Binding ✅ COMPLETE
+- [x] **PostgreSQL Session Store** (connect-pg-simple with 30-day expiry)
+- [x] **requireMerchant Middleware** (extracts merchantId from session, rejects unauthenticated)
+- [x] **IDOR Prevention** (merchantId comes exclusively from server session, client params ignored)
+- [x] **/api/auth/status Endpoint** (returns `{ authenticated, merchantId }` for frontend auth check)
+- [x] **OAuth Callback Enhancement** (sets `session.merchantId` and redirects to dashboard)
+
+### Task 0.5: FOUC Prevention ✅ COMPLETE
+- [x] **ObsidianSkeleton Component** (branded loading skeleton matching navbar height)
+- [x] **Slow-Pulse Animation** (2s duration CSS animation for skeleton cards)
+- [x] **Auth-Aware App Shell** (shows skeleton while `authLoading` resolves, prevents layout shift)
+
 ### API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Basic health check |
 | GET | `/api/auth/stripe` | Initiate Stripe OAuth |
-| GET | `/api/auth/callback` | Handle OAuth callback |
+| GET | `/api/auth/callback` | Handle OAuth callback (sets session.merchantId) |
+| GET | `/api/auth/status` | Check authentication status (`{ authenticated, merchantId }`) |
 | GET | `/api/auth/success` | OAuth success redirect page |
 | GET | `/api/auth/error` | OAuth error redirect page |
-| GET | `/api/audit/run` | Trigger ghost scan (requires merchantId query param) |
+| GET | `/api/audit/run` | Trigger ghost scan (uses session merchantId) |
 | GET | `/api/pulse/run` | Trigger recovery emails for all merchants |
 | POST | `/api/webhooks/stripe` | Stripe webhook receiver |
 | GET | `/api/merchant/stats` | Get merchant recovery statistics |
@@ -117,6 +130,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 | `liquidity_oracle` | Anonymized timing metadata |
 | `system_logs` | Job execution logs for health monitoring |
 | `cron_locks` | Atomic job locking to prevent overlapping cron executions |
+| `session` | PostgreSQL session store (connect-pg-simple, auto-created) |
 
 #### Revenue Intelligence Columns (merchants table)
 
@@ -142,14 +156,27 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 ```
 ├── client/                    # React Frontend
 │   └── src/
-│       ├── components/ui/     # shadcn/ui components (40+ components)
+│       ├── components/
+│       │   ├── ui/            # shadcn/ui components (40+ components)
+│       │   ├── Layout.tsx     # Main layout with TopNav + content area
+│       │   ├── TopNav.tsx     # Obsidian-themed navigation bar (h-16)
+│       │   └── ObsidianSkeleton.tsx  # Branded loading skeleton (FOUC prevention)
+│       ├── context/
+│       │   └── MerchantContext.tsx   # Auth state + merchant stats provider
 │       ├── hooks/             # Custom hooks (use-toast, use-mobile)
 │       ├── lib/               # Utilities (queryClient, utils)
-│       ├── pages/             # Route pages (home, not-found)
-│       ├── App.tsx            # Main app with routing
-│       └── index.css          # Tailwind + theme variables
+│       ├── pages/
+│       │   ├── DashboardPage.tsx     # Main metrics dashboard
+│       │   ├── RecoveriesPage.tsx    # Ghost targets list + recovery details
+│       │   ├── GrowthPage.tsx        # Growth analytics (placeholder)
+│       │   ├── SettingsPage.tsx      # Merchant settings (placeholder)
+│       │   └── not-found.tsx         # 404 page
+│       ├── App.tsx            # Main app with auth-aware routing
+│       └── index.css          # Tailwind + theme + slow-pulse animation
 │
 ├── server/                    # Express Backend
+│   ├── middleware/
+│   │   └── auth.ts            # requireMerchant session middleware
 │   ├── services/              # Core business logic
 │   │   ├── ghostHunter.ts     # Invoice scanning + ghost detection
 │   │   ├── pulseEngine.ts     # Email orchestration logic
@@ -161,7 +188,7 @@ PHANTOM is a headless revenue intelligence engine that identifies "Ghost Users"�
 │   ├── db.ts                  # Drizzle database connection
 │   ├── routes.ts              # API route definitions
 │   ├── storage.ts             # Database access layer (IStorage)
-│   └── index.ts               # Server entry point
+│   └── index.ts               # Server entry + PostgreSQL session store
 │
 ├── shared/                    # Shared Types
 │   └── schema.ts              # Drizzle schema + Zod validators
@@ -379,6 +406,28 @@ PHANTOM enforces subscription tier limits to restrict ghost ingestion:
 ---
 
 ### 3. Security & Encryption Perimeter
+
+#### Session Security (`server/index.ts` + `server/middleware/auth.ts`)
+
+| Component | Implementation |
+|-----------|----------------|
+| **Session Store** | PostgreSQL via `connect-pg-simple` (table: `session`) |
+| **Cookie Name** | `phantom.sid` |
+| **Cookie Expiry** | 30 days (`maxAge: 30 * 24 * 60 * 60 * 1000`) |
+| **Cookie Flags** | `httpOnly: true`, `sameSite: lax`, `secure: true` (production) |
+| **Secret** | `SESSION_SECRET` environment variable |
+
+**IDOR Prevention:**
+- All protected routes use `requireMerchant` middleware
+- Middleware extracts `merchantId` exclusively from `req.session.merchantId`
+- Client-side `merchant_id` query parameters are **ignored** (not trusted)
+- Unauthenticated requests receive `401 Unauthorized`
+
+**OAuth Flow:**
+1. User initiates Stripe Connect OAuth at `/api/auth/stripe`
+2. Callback at `/api/auth/callback` exchanges code for token
+3. Token encrypted and stored; `session.merchantId` set
+4. Redirect to dashboard (`/`) with valid session
 
 #### Identity Encryption Wrapper (crypto.ts)
 
@@ -603,4 +652,48 @@ interface IStorage {
 
 ---
 
-*Last Updated: December 28, 2025*
+### 7. Design System: Surgical/Titanium Aesthetic
+
+#### Color Palette
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| **Obsidian** | `#0A0A0A` | Primary background (dark mode default) |
+| **Emerald-500** | `#10B981` | Recovered revenue ONLY (success state) |
+| **Slate-400** | `#94A3B8` | Leaked/at-risk revenue |
+| **Slate-200** | `#E2E8F0` | Primary text on dark backgrounds |
+| **Slate-500** | `#64748B` | Secondary/muted text |
+| **White/10** | `rgba(255,255,255,0.1)` | Borders, dividers |
+
+#### Typography
+
+| Element | Font | Weight |
+|---------|------|--------|
+| **Prose** | Inter | 400, 500, 600 |
+| **Data/Mono** | JetBrains Mono | 400, 500 |
+
+#### Component Specifications
+
+| Component | Specification |
+|-----------|---------------|
+| **TopNav** | `h-16` (64px), sticky, Obsidian background |
+| **Cards** | `bg-slate-900`, `border-white/10`, `rounded-md` |
+| **Skeleton** | `animate-slow-pulse` (2s duration) |
+| **Buttons** | shadcn defaults with Obsidian integration |
+
+#### Animation
+
+| Name | Duration | Purpose |
+|------|----------|---------|
+| `slow-pulse` | 2s | Loading skeleton states (FOUC prevention) |
+
+**Design Philosophy:**
+- Dark-first interface reflecting security/intelligence theme
+- Emerald reserved exclusively for positive revenue recovery
+- Slate tones for all non-success states
+- Minimal borders, subtle contrast differentiations
+- JetBrains Mono for all financial/numeric data
+
+---
+
+*Last Updated: December 29, 2025*
