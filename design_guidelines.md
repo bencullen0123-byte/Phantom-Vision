@@ -1,74 +1,126 @@
-# PHANTOM Revenue Intelligence - Design Guidelines
+# PHANTOM Design System v1.0
 
-## Design Approach: Enterprise Security-First
+## Design Approach: Surgical/Titanium Aesthetic
 
-**Selected Framework:** Fluent Design System (Microsoft) - optimized for data-heavy B2B applications with strong security posture
+**Philosophy:** PHANTOM communicates precision, trust, and technical sophistication through a dark, clinical interface optimized for revenue intelligence data.
 
-**Design Philosophy:** 
-PHANTOM is a professional revenue intelligence tool. The design must communicate trust, precision, and technical sophistication. Minimal UI in Stage 1, but foundation must scale to future dashboard-heavy stages.
+---
 
-## Core Design Elements
+## Primary Palette
 
-### Typography
-- **Primary Font:** Inter (via Google Fonts)
-  - Headings: 600-700 weight
-  - Body: 400 weight
-  - Code/Data: 500 weight (tabular-nums)
-- **Hierarchy:**
-  - H1: text-4xl (36px)
-  - H2: text-2xl (24px)
-  - Body: text-base (16px)
-  - Data Labels: text-sm (14px)
+| Color | Hex | Tailwind | Usage |
+|-------|-----|----------|-------|
+| **Obsidian** | `#0A0A0B` | `bg-obsidian` | Primary background color |
+| **Slate-900** | `#0f172a` | `bg-slate-900` | Card backgrounds |
+| **Slate-800** | `#1e293b` | `border-slate-800` | Borders and dividers |
 
-### Layout System
-**Spacing Scale:** Tailwind units of 4, 6, 8, 12, 16
-- Component padding: p-6 or p-8
-- Section gaps: gap-8 to gap-12
-- Container max-width: max-w-6xl
+## Functional Accents
 
-### Component Library
+| Color | Tailwind Class | Usage |
+|-------|----------------|-------|
+| **Emerald-500** | `text-emerald-500` | ONLY for numerical revenue that has been "Recovered" (Attributed) |
+| **Indigo-600** | `bg-indigo-600` | Primary actions and system navigation |
+| **Slate-400** | `text-slate-400` | "Leaked" or "Shadow" revenue totals (implies inaccessible) |
 
-**Stage 1 (Minimal UI):**
-- **OAuth Landing Page:**
-  - Centered layout (flex items-center justify-center min-h-screen)
-  - Card container: bg-white shadow-lg rounded-lg p-8 max-w-md
-  - Logo/Title: Text-based "PHANTOM" in uppercase, tracking-tight
-  - "Connect Stripe" button: Primary CTA with Stripe branding colors
-  - Status messages: JSON response displayed in monospace font
+---
 
-**Future Stages (Dashboard):**
-- **Navigation:** Left sidebar, collapsed by default, 64px icons-only mode
-- **Data Tables:** Striped rows, fixed headers, sortable columns
-- **Cards:** Minimal elevation (shadow-sm), border-l-4 for status indicators
-- **Buttons:** 
-  - Primary: Solid fill
-  - Secondary: Border outline
-  - Height: h-10 or h-12
-  - All buttons: rounded-md
+## Typography Rules
 
-### Color Philosophy
-Security-first palette (to be implemented later):
-- Emphasize data hierarchy through contrast
-- Status colors: Success (green), Warning (amber), Critical (red)
-- Neutral grays for backgrounds and borders
+### Numerical Data
+- **Font Family:** `font-mono` (JetBrains Mono)
+- **Use for:** Currency values, percentages, timestamps, IDs
 
-### Interaction Patterns
-- **Loading States:** Skeleton screens for data tables
-- **Error Handling:** Inline validation, toast notifications for system errors
-- **OAuth Flow:** Clear step indicators, minimal distraction
-- **Animations:** Subtle (200ms transitions), only for state changes
+### Interface Prose
+- **Font Family:** `font-sans` (Inter)
+- **Use for:** Labels, menus, descriptions, headers, body text
 
-## Images
-**No hero images required.** PHANTOM is a headless B2B tool. Stage 1 needs only:
-- Company logo (SVG, monochrome)
-- Stripe Connect button (use official Stripe assets)
+### Font Weights
 
-Future stages may include:
-- Icon library: Heroicons for data visualization icons
-- Status indicators: SVG badges for Ghost User states
+| Font | Weight | Usage |
+|------|--------|-------|
+| Inter | 400 | Body text |
+| Inter | 500 | Labels, emphasis |
+| Inter | 600 | Headings, section titles |
+| JetBrains Mono | 400 | Data values |
+| JetBrains Mono | 500 | Highlighted metrics |
 
-## Accessibility
-- WCAG 2.1 AA compliance
-- Keyboard navigation for all OAuth flows
-- High contrast for financial data displays
-- Screen reader labels for all data tables
+---
+
+## Component Patterns
+
+### Cards
+```tsx
+<div className="bg-slate-900 border border-white/10 rounded-md p-4">
+  {/* Card content */}
+</div>
+```
+
+### Revenue Display (Recovered)
+```tsx
+<span className="font-mono text-emerald-500">£4,200.50</span>
+```
+
+### Revenue Display (Leaked/Shadow)
+```tsx
+<span className="font-mono text-slate-400">£12,500.00</span>
+```
+
+### Primary Action Button
+```tsx
+<Button className="bg-indigo-600 hover:bg-indigo-700">
+  Start Audit
+</Button>
+```
+
+### Subtle Borders
+```tsx
+<div className="border border-white/10">
+  {/* Content with subtle border */}
+</div>
+```
+
+---
+
+## Global Styles
+
+- Body background: `bg-obsidian` (#0A0A0B)
+- Default text: `text-slate-200`
+- Default font: `font-sans` (Inter)
+
+---
+
+## Typography Hierarchy
+
+| Element | Size | Weight | Font |
+|---------|------|--------|------|
+| H1 | `text-4xl` | 600 | Inter |
+| H2 | `text-2xl` | 600 | Inter |
+| H3 | `text-xl` | 500 | Inter |
+| Body | `text-base` | 400 | Inter |
+| Data Labels | `text-sm` | 400 | Inter |
+| Metrics | `text-lg` | 500 | JetBrains Mono |
+| Currency | varies | 400-500 | JetBrains Mono |
+
+---
+
+## Layout Guidelines
+
+- **Container max-width:** `max-w-6xl`
+- **Component padding:** `p-6` or `p-8`
+- **Section gaps:** `gap-8` to `gap-12`
+- **Card padding:** `p-4` to `p-6`
+
+---
+
+## Status Colors
+
+| Status | Color | Usage |
+|--------|-------|-------|
+| Success/Recovered | Emerald-500 | Recovered revenue, successful operations |
+| Warning | Amber-500 | Pending actions, attention needed |
+| Critical/Error | Red-500 | Failed operations, errors |
+| Neutral/Shadow | Slate-400 | Leaked revenue, inactive states |
+
+---
+
+**Note:** All future components MUST reference this design system. The "Surgical/Titanium" aesthetic requires strict adherence to these specifications.

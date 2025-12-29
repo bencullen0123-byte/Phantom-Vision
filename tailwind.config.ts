@@ -11,6 +11,8 @@ export default {
         sm: ".1875rem", /* 3px */
       },
       colors: {
+        // PHANTOM Surgical/Titanium palette
+        obsidian: "#0A0A0B",
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
@@ -83,9 +85,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
+        sans: ["Inter", "var(--font-sans)", "sans-serif"],
         serif: ["var(--font-serif)"],
-        mono: ["var(--font-mono)"],
+        mono: ["JetBrains Mono", "var(--font-mono)", "monospace"],
       },
       keyframes: {
         "accordion-down": {
