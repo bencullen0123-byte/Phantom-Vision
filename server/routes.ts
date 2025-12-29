@@ -420,6 +420,47 @@ export async function registerRoutes(
     }
   });
 
+  // Ghost Targets API - returns decrypted ghost targets for authenticated merchant
+  app.get("/api/merchant/ghosts", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const ghosts = await storage.getGhostTargetsByMerchant(merchantId);
+      
+      // Sort by discoveredAt descending (most recent first)
+      ghosts.sort((a, b) => {
+        const dateA = a.discoveredAt ? new Date(a.discoveredAt).getTime() : 0;
+        const dateB = b.discoveredAt ? new Date(b.discoveredAt).getTime() : 0;
+        return dateB - dateA;
+      });
+
+      // Map to API response format (hide internal encryption fields)
+      const response = ghosts.map(ghost => ({
+        id: ghost.id,
+        email: ghost.email,
+        customerName: ghost.customerName,
+        amount: ghost.amount,
+        invoiceId: ghost.invoiceId,
+        discoveredAt: ghost.discoveredAt,
+        lastEmailedAt: ghost.lastEmailedAt,
+        emailCount: ghost.emailCount,
+        status: ghost.status,
+        recoveredAt: ghost.recoveredAt,
+        recoveryType: ghost.recoveryType,
+        declineType: ghost.declineType,
+      }));
+
+      return res.json(response);
+    } catch (error: any) {
+      console.error("[GHOSTS] Failed to get ghost targets:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve ghost targets",
+        error: error.message
+      });
+    }
+  });
+
   // System Health endpoint - returns scheduler status and recent logs
   app.get("/api/system/health", async (_req: Request, res: Response) => {
     try {
