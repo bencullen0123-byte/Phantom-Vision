@@ -461,6 +461,24 @@ export async function registerRoutes(
     }
   });
 
+  // Intelligence Logs - returns decision transparency feed for merchant
+  app.get("/api/merchant/logs", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+
+    try {
+      const logs = await storage.getIntelligenceLogs(merchantId, limit);
+      return res.json(logs);
+    } catch (error: any) {
+      console.error("[LOGS] Failed to get intelligence logs:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve logs",
+        error: error.message
+      });
+    }
+  });
+
   // System Health endpoint - returns scheduler status and recent logs
   app.get("/api/system/health", async (_req: Request, res: Response) => {
     try {

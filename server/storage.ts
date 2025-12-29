@@ -578,6 +578,92 @@ export class DatabaseStorage implements IStorage {
     
     return result.length > 0;
   }
+
+  // Intelligence Logs - synthesizes decision events from ghost targets
+  async getIntelligenceLogs(merchantId: string, limit: number = 50): Promise<{
+    id: string;
+    timestamp: Date;
+    type: "discovery" | "action" | "success" | "info";
+    message: string;
+    amount: number | null;
+  }[]> {
+    const ghosts = await this.getGhostTargetsByMerchant(merchantId);
+    
+    const logs: {
+      id: string;
+      timestamp: Date;
+      type: "discovery" | "action" | "success" | "info";
+      message: string;
+      amount: number | null;
+    }[] = [];
+
+    for (const ghost of ghosts) {
+      // Discovery event
+      logs.push({
+        id: `${ghost.id}-discovery`,
+        timestamp: ghost.discoveredAt,
+        type: "discovery",
+        message: `Deep Harvest identified uncollected revenue from invoice ${ghost.invoiceId.slice(0, 12)}...`,
+        amount: ghost.amount,
+      });
+
+      // Email action events
+      if (ghost.emailCount > 0 && ghost.lastEmailedAt) {
+        const declineStrategy = this.getDeclineStrategy(ghost.declineType);
+        logs.push({
+          id: `${ghost.id}-email`,
+          timestamp: ghost.lastEmailedAt,
+          type: "action",
+          message: declineStrategy,
+          amount: null,
+        });
+      }
+
+      // Recovery success event
+      if (ghost.status === "recovered" && ghost.recoveredAt) {
+        const attribution = ghost.recoveryType === "direct" ? "Direct attribution confirmed" : "Organic recovery detected";
+        logs.push({
+          id: `${ghost.id}-recovery`,
+          timestamp: ghost.recoveredAt,
+          type: "success",
+          message: `${attribution} - Payment received for invoice ${ghost.invoiceId.slice(0, 12)}...`,
+          amount: ghost.amount,
+        });
+      }
+
+      // Exhausted event
+      if (ghost.status === "exhausted") {
+        logs.push({
+          id: `${ghost.id}-exhausted`,
+          timestamp: ghost.lastEmailedAt || ghost.discoveredAt,
+          type: "info",
+          message: `Recovery sequence complete. Maximum outreach attempts reached for ${ghost.invoiceId.slice(0, 12)}...`,
+          amount: null,
+        });
+      }
+    }
+
+    // Sort by timestamp descending and limit
+    logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return logs.slice(0, limit);
+  }
+
+  private getDeclineStrategy(declineType: string | null): string {
+    switch (declineType) {
+      case "expired_card":
+        return "Strategy: Immediate Outreach triggered. Bypassing Oracle timing for Expired Card.";
+      case "insufficient_funds":
+        return "Strategy: Intelligent Hold. Retrying in 24h based on high-probability liquidity window.";
+      case "card_declined":
+        return "Strategy: Standard Recovery initiated. Card declined - generic failure code.";
+      case "processing_error":
+        return "Strategy: Delayed Retry. Processing error detected - temporary issue likely.";
+      case "fraudulent":
+        return "Strategy: Case Flagged. Potential fraud indicator - manual review recommended.";
+      default:
+        return "Strategy: Recovery Pulse dispatched. Email sequence initiated.";
+    }
+  }
 }
 
 export const storage = new DatabaseStorage();

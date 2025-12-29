@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, TrendingUp, Settings, DollarSign } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Settings, DollarSign, Terminal } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -12,6 +12,7 @@ const navItems: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Recoveries", path: "/recoveries", icon: DollarSign },
   { label: "Growth", path: "/growth", icon: TrendingUp },
+  { label: "System", path: "/system", icon: Terminal },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 

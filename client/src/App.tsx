@@ -9,6 +9,7 @@ import ObsidianSkeleton from "@/components/ObsidianSkeleton";
 import DashboardPage from "@/pages/DashboardPage";
 import RecoveriesPage from "@/pages/RecoveriesPage";
 import GrowthPage from "@/pages/GrowthPage";
+import SystemPage from "@/pages/SystemPage";
 import SettingsPage from "@/pages/SettingsPage";
 import NotFound from "@/pages/not-found";
 
@@ -19,6 +20,7 @@ function Router() {
         <Route path="/" component={DashboardPage} />
         <Route path="/recoveries" component={RecoveriesPage} />
         <Route path="/growth" component={GrowthPage} />
+        <Route path="/system" component={SystemPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route component={NotFound} />
       </Switch>
