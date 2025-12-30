@@ -141,6 +141,7 @@ export interface IStorage {
   getAllMerchants(): Promise<Merchant[]>;
   updateMerchant(id: string, updates: Partial<InsertMerchant>): Promise<Merchant | undefined>;
   incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>;
+  incrementMerchantProtection(id: string, amountCents: number): Promise<Merchant | undefined>;
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
   updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
   updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined>;
@@ -159,7 +160,9 @@ export interface IStorage {
   getEligibleGhostsForEmail(): Promise<GhostTarget[]>;
   updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined>;
   markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined>;
+  markGhostProtected(id: string): Promise<GhostTarget | undefined>;
   markGhostExhausted(id: string): Promise<GhostTarget | undefined>;
+  getImpendingGhostByStripeCustomerId(stripeCustomerId: string): Promise<GhostTarget | undefined>;
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
   setGhostAttributionFlag(id: string, expiresAt: Date): Promise<GhostTarget | undefined>;
@@ -217,6 +220,18 @@ export class DatabaseStorage implements IStorage {
       .update(merchants)
       .set({
         totalRecoveredCents: sql`${merchants.totalRecoveredCents} + ${amountCents}`,
+      })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async incrementMerchantProtection(id: string, amountCents: number): Promise<Merchant | undefined> {
+    const [updated] = await db
+      .update(merchants)
+      .set({
+        totalProtectedCents: sql`${merchants.totalProtectedCents} + ${amountCents}`,
+        impendingLeakageCents: sql`GREATEST(0, ${merchants.impendingLeakageCents} - ${amountCents})`,
       })
       .where(eq(merchants.id, id))
       .returning();
@@ -473,6 +488,35 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(ghostTargets.id, id))
       .returning();
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
+  }
+
+  async markGhostProtected(id: string): Promise<GhostTarget | undefined> {
+    const [dbRecord] = await db
+      .update(ghostTargets)
+      .set({
+        status: "protected",
+        recoveredAt: new Date(),
+      })
+      .where(and(
+        eq(ghostTargets.id, id),
+        eq(ghostTargets.status, "impending")
+      ))
+      .returning();
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
+  }
+
+  async getImpendingGhostByStripeCustomerId(stripeCustomerId: string): Promise<GhostTarget | undefined> {
+    const [dbRecord] = await db
+      .select()
+      .from(ghostTargets)
+      .where(and(
+        eq(ghostTargets.stripeCustomerId, stripeCustomerId),
+        eq(ghostTargets.status, "impending")
+      ))
+      .limit(1);
     if (!dbRecord) return undefined;
     return decryptGhostTarget(dbRecord);
   }
