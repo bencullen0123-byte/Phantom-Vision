@@ -472,6 +472,22 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
 
+  // Serialize the Funnel for JSON Detail Persistence
+  const funnelData = {
+    total: telemetry.totalPaymentEvents,
+    recurring: telemetry.subscriptionLinked,
+    skipped: telemetry.subscriptionFailed,
+  };
+  
+  const humanSummary = `Scan complete: ${totalInvoicesScanned} invoices, ${result.ghostsFound.length} ghosts, $${(result.totalRevenueAtRisk / 100).toFixed(2)} at risk`;
+  
+  await storage.createSystemLog({
+    jobName: "ghost_hunter",
+    status: result.errors.length === 0 ? "success" : "failure",
+    details: JSON.stringify({ funnel: funnelData, summary: humanSummary }),
+    errorMessage: result.errors.length > 0 ? result.errors.join("; ") : null,
+  });
+
   // Attach telemetry to result
   result.telemetry = telemetry;
 
