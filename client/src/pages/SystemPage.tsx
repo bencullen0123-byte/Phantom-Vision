@@ -1,11 +1,12 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck } from "lucide-react";
+import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck, Share2, Copy } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ForensicFunnel, parseDiagnosticMessage } from "@/components/ForensicFunnel";
+import { useToast } from "@/hooks/use-toast";
 
 interface IntelligenceLog {
   id: string;
@@ -49,6 +50,16 @@ function formatCurrency(cents: number, currency: string = "gbp"): string {
     maximumFractionDigits: 2,
   });
   return `${symbol}${amount}`;
+}
+
+function generateSuccessPost(amountCents: number, integrityScore: number, currency: string = "gbp"): string {
+  const formattedAmount = formatCurrency(amountCents, currency);
+  return `Just protected ${formattedAmount} in revenue with PHANTOM. Current Revenue Integrity at ${integrityScore}%. Churn is down. Revenue is up.`;
+}
+
+function generateIntegritySharePost(revenueGuarded: number, integrityScore: number, currency: string = "gbp"): string {
+  const formattedAmount = formatCurrency(revenueGuarded, currency);
+  return `Revenue Integrity Report: ${formattedAmount} protected with ${integrityScore}% integrity score. Powered by PHANTOM Revenue Intelligence.`;
 }
 
 
@@ -102,11 +113,30 @@ function LogEntrySkeleton() {
   );
 }
 
-function IntelligenceLogFeed() {
+function IntelligenceLogFeed({ stats }: { stats?: MerchantStats }) {
+  const { toast } = useToast();
   const logsQuery = useQuery<IntelligenceLog[]>({
     queryKey: ["/api/merchant/logs"],
     refetchInterval: 10000,
   });
+
+  const handleShareSuccess = (amountCents: number) => {
+    if (!stats) return;
+    
+    const revenueGuarded = stats.lifetime.totalRecoveredCents + stats.totalProtectedCents;
+    const shadowLeakage = stats.lifetime.allTimeLeakedCents;
+    const totalExposure = revenueGuarded + shadowLeakage;
+    const integrityScore = totalExposure > 0 
+      ? Math.round((revenueGuarded / totalExposure) * 100) 
+      : 100;
+    
+    const post = generateSuccessPost(amountCents, integrityScore, stats.defaultCurrency);
+    navigator.clipboard.writeText(post);
+    toast({
+      title: "Copied to clipboard",
+      description: "Your success post is ready to share!",
+    });
+  };
 
   if (logsQuery.isLoading) {
     return (
@@ -196,14 +226,27 @@ function IntelligenceLogFeed() {
                   </span>
                 )}
                 {log.isDirect && (
-                  <Badge 
-                    variant="outline" 
-                    className="h-5 text-[10px] border-emerald-500/50 text-emerald-400 bg-emerald-500/10 gap-1"
-                    data-testid="badge-pulse-verified"
-                  >
-                    <BadgeCheck className="w-3 h-3" />
-                    Pulse-Verified
-                  </Badge>
+                  <>
+                    <Badge 
+                      variant="outline" 
+                      className="h-5 text-[10px] border-emerald-500/50 text-emerald-400 bg-emerald-500/10 gap-1"
+                      data-testid="badge-pulse-verified"
+                    >
+                      <BadgeCheck className="w-3 h-3" />
+                      Pulse-Verified
+                    </Badge>
+                    {log.amount && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5 text-slate-500 hover:text-emerald-400"
+                        onClick={() => handleShareSuccess(log.amount!)}
+                        data-testid={`button-share-${log.id}`}
+                      >
+                        <Share2 className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </>
                 )}
               </div>
               <p className={`text-xs leading-relaxed ${getLogColorClass(log.type)}`}>
@@ -219,6 +262,7 @@ function IntelligenceLogFeed() {
 }
 
 function CFOHeadline({ stats }: { stats: MerchantStats }) {
+  const { toast } = useToast();
   const currency = stats.defaultCurrency;
   
   const revenueGuarded = stats.lifetime.totalRecoveredCents + stats.totalProtectedCents;
@@ -229,9 +273,31 @@ function CFOHeadline({ stats }: { stats: MerchantStats }) {
   const integrityScore = totalExposure > 0 
     ? Math.round((revenueGuarded / totalExposure) * 100) 
     : 100;
+
+  const handleShareIntegrity = () => {
+    const post = generateIntegritySharePost(revenueGuarded, integrityScore, currency);
+    navigator.clipboard.writeText(post);
+    toast({
+      title: "Copied to clipboard",
+      description: "Your integrity report is ready to share!",
+    });
+  };
   
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" data-testid="cfo-headline">
+    <div className="space-y-3 mb-6">
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-white/10 text-slate-400 gap-2"
+          onClick={handleShareIntegrity}
+          data-testid="button-share-integrity"
+        >
+          <Copy className="w-3 h-3" />
+          Share Integrity Report
+        </Button>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="cfo-headline">
       <Card className="bg-slate-900 border-emerald-500/20 p-4">
         <div className="flex items-center gap-2 mb-2">
           <Shield className="w-4 h-4 text-emerald-500" />
@@ -291,6 +357,7 @@ function CFOHeadline({ stats }: { stats: MerchantStats }) {
         </div>
         <p className="text-[10px] text-slate-500 mt-1">Guarded / Total Exposure</p>
       </Card>
+      </div>
     </div>
   );
 }
@@ -345,7 +412,7 @@ export default function SystemPage() {
         <CFOHeadline stats={statsQuery.data} />
       ) : null}
 
-      <IntelligenceLogFeed />
+      <IntelligenceLogFeed stats={statsQuery.data} />
     </div>
   );
 }
