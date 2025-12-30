@@ -105,6 +105,7 @@ function LogEntrySkeleton() {
 function IntelligenceLogFeed() {
   const logsQuery = useQuery<IntelligenceLog[]>({
     queryKey: ["/api/merchant/logs"],
+    refetchInterval: 10000,
   });
 
   if (logsQuery.isLoading) {
@@ -300,6 +301,7 @@ export default function SystemPage() {
   const statsQuery = useQuery<MerchantStats>({
     queryKey: ["/api/merchant/stats"],
     enabled: isAuthenticated,
+    refetchInterval: 10000,
   });
 
   if (authLoading) {
