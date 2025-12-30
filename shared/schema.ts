@@ -21,6 +21,12 @@ export const merchants = pgTable("merchants", {
   lastAuditAt: timestamp("last_audit_at"),
   // Tiered Capacity Gating: max pending ghosts allowed per subscription tier
   tierLimit: integer("tier_limit").default(50).notNull(),
+  // Multi-Currency Revenue Firewall
+  defaultCurrency: text("default_currency").default("gbp").notNull(),
+  // Proactive Revenue Protection: tracks revenue from expiring cards
+  impendingLeakageCents: bigint("impending_leakage_cents", { mode: "number" }).default(0).notNull(),
+  // Revenue saved by proactive outreach
+  totalProtectedCents: bigint("total_protected_cents", { mode: "number" }).default(0).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
