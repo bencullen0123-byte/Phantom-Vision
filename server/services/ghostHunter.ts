@@ -265,6 +265,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   
   // Overflow Rule: Track if we hit tier limit mid-scan
   let tierLimitReached = false;
+  
+  // Multi-Currency Detection: capture currency from first invoice
+  let detectedCurrency: string | undefined;
 
   // Recursive cursor-based pagination - no invoice limit
   while (hasMore) {
@@ -291,6 +294,12 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         totalInvoicesScanned++;
         telemetry.recordsProcessed++;
         telemetry.totalPaymentEvents++;
+        
+        // Multi-Currency Detection: capture currency from first invoice
+        if (!detectedCurrency && invoice.currency) {
+          detectedCurrency = invoice.currency.toLowerCase();
+          console.log(`[GHOST HUNTER] Currency detected: ${detectedCurrency.toUpperCase()}`);
+        }
 
         // THROTTLE: Delay every THROTTLE_BATCH_SIZE records
         if (telemetry.recordsProcessed % THROTTLE_BATCH_SIZE === 0) {
@@ -440,8 +449,10 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         allTimeLeakedCents: shadowRevenueTally,
         totalGhostCount: ghostCountTally,
         lastAuditAt: new Date(),
+        defaultCurrency: detectedCurrency,
       });
-      console.log(`[GHOST HUNTER] Shadow Revenue updated: $${(shadowRevenueTally / 100).toFixed(2)} across ${ghostCountTally} ghosts`);
+      const currencySymbol = detectedCurrency?.toUpperCase() || 'GBP';
+      console.log(`[GHOST HUNTER] Shadow Revenue updated: ${currencySymbol} ${(shadowRevenueTally / 100).toFixed(2)} across ${ghostCountTally} ghosts`);
     } catch (error: any) {
       result.errors.push(`Failed to persist Shadow Revenue: ${error.message}`);
       console.error(`[GHOST HUNTER] Shadow Revenue persistence error:`, error);

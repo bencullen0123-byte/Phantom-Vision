@@ -29,6 +29,9 @@ export interface HistoricalRevenueStats {
     totalGhostCount: number;
     totalRecoveredCents: number;
   };
+  defaultCurrency: string;
+  impendingLeakageCents: number;
+  totalProtectedCents: number;
   monthlyTrend: MonthlyTrendPoint[];
   dailyPulse: DailyPulsePoint[];
 }
@@ -37,6 +40,7 @@ export interface ShadowRevenueUpdate {
   allTimeLeakedCents: number;
   totalGhostCount: number;
   lastAuditAt: Date;
+  defaultCurrency?: string;
 }
 
 // TITANIUM: Decryption error placeholder - prevents system-wide crash on key mismatch
@@ -235,14 +239,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined> {
-    // Atomic transaction: update all three Shadow Revenue fields simultaneously
+    // Atomic transaction: update Shadow Revenue fields + optional currency detection
+    const updatePayload: Record<string, any> = {
+      allTimeLeakedCents: data.allTimeLeakedCents,
+      totalGhostCount: data.totalGhostCount,
+      lastAuditAt: data.lastAuditAt,
+    };
+    
+    // Include currency update if detected during scan
+    if (data.defaultCurrency) {
+      updatePayload.defaultCurrency = data.defaultCurrency;
+    }
+    
     const [updated] = await db
       .update(merchants)
-      .set({
-        allTimeLeakedCents: data.allTimeLeakedCents,
-        totalGhostCount: data.totalGhostCount,
-        lastAuditAt: data.lastAuditAt,
-      })
+      .set(updatePayload)
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
@@ -301,6 +312,9 @@ export class DatabaseStorage implements IStorage {
         totalGhostCount: merchant?.totalGhostCount || 0,
         totalRecoveredCents: Number(merchant?.totalRecoveredCents || 0),
       },
+      defaultCurrency: merchant?.defaultCurrency || 'gbp',
+      impendingLeakageCents: Number(merchant?.impendingLeakageCents || 0),
+      totalProtectedCents: Number(merchant?.totalProtectedCents || 0),
       monthlyTrend,
       dailyPulse,
     };
