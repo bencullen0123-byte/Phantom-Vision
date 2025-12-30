@@ -125,7 +125,7 @@ function getLogColorClass(type: IntelligenceLog["type"]): string {
     case "success":
       return "text-emerald-500";
     case "info":
-      return "text-slate-500";
+      return "text-sky-400";
   }
 }
 
