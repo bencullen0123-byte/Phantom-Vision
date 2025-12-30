@@ -420,6 +420,9 @@ export async function registerRoutes(
         tierLimit: merchant.tierLimit,
         recoveryStrategy: merchant.recoveryStrategy,
         lifetime: historicalStats.lifetime,
+        defaultCurrency: historicalStats.defaultCurrency,
+        impendingLeakageCents: historicalStats.impendingLeakageCents,
+        totalProtectedCents: historicalStats.totalProtectedCents,
         monthlyTrend: historicalStats.monthlyTrend,
         dailyPulse: historicalStats.dailyPulse,
       });

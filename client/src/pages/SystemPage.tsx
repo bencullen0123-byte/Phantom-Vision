@@ -1,8 +1,9 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Terminal, Activity, Zap, CheckCircle, Info } from "lucide-react";
+import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 interface IntelligenceLog {
   id: string;
@@ -12,11 +13,39 @@ interface IntelligenceLog {
   amount: number | null;
 }
 
-function formatCurrency(cents: number): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format(cents / 100);
+interface MerchantStats {
+  id: string;
+  lastAuditAt: string | null;
+  tierLimit: number;
+  recoveryStrategy: string;
+  lifetime: {
+    allTimeLeakedCents: number;
+    totalGhostCount: number;
+    totalRecoveredCents: number;
+  };
+  defaultCurrency: string;
+  impendingLeakageCents: number;
+  totalProtectedCents: number;
+  monthlyTrend: Array<{ month: string; leaked: number; recovered: number }>;
+  dailyPulse: Array<{ date: string; leaked: number; recovered: number }>;
+}
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  gbp: "\u00a3",
+  usd: "$",
+  eur: "\u20ac",
+  cad: "C$",
+  aud: "A$",
+  jpy: "\u00a5",
+};
+
+function formatCurrency(cents: number, currency: string = "gbp"): string {
+  const symbol = CURRENCY_SYMBOLS[currency.toLowerCase()] || "\u00a3";
+  const amount = (cents / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${symbol}${amount}`;
 }
 
 interface FunnelData {
@@ -246,8 +275,90 @@ function IntelligenceLogFeed() {
   );
 }
 
+function CFOHeadline({ stats }: { stats: MerchantStats }) {
+  const currency = stats.defaultCurrency;
+  
+  const revenueGuarded = stats.lifetime.totalRecoveredCents + stats.totalProtectedCents;
+  const shadowLeakage = stats.lifetime.allTimeLeakedCents;
+  const impendingRisk = stats.impendingLeakageCents;
+  
+  const totalExposure = revenueGuarded + shadowLeakage;
+  const integrityScore = totalExposure > 0 
+    ? Math.round((revenueGuarded / totalExposure) * 100) 
+    : 100;
+  
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" data-testid="cfo-headline">
+      <Card className="bg-slate-900 border-emerald-500/20 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="w-4 h-4 text-emerald-500" />
+          <span className="text-xs text-slate-400 uppercase tracking-wide">Revenue Guarded</span>
+        </div>
+        <div 
+          className="text-2xl font-semibold text-emerald-400"
+          style={{ fontFamily: "JetBrains Mono, monospace" }}
+          data-testid="kpi-revenue-guarded"
+        >
+          {formatCurrency(revenueGuarded, currency)}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-1">Protected + Recovered</p>
+      </Card>
+      
+      <Card className="bg-slate-900 border-amber-500/20 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500" />
+          <span className="text-xs text-slate-400 uppercase tracking-wide">Shadow Leakage</span>
+        </div>
+        <div 
+          className="text-2xl font-semibold text-amber-400"
+          style={{ fontFamily: "JetBrains Mono, monospace" }}
+          data-testid="kpi-shadow-leakage"
+        >
+          {formatCurrency(shadowLeakage, currency)}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-1">{stats.lifetime.totalGhostCount} ghost users</p>
+      </Card>
+      
+      <Card className="bg-slate-900 border-red-500/20 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <TrendingUp className="w-4 h-4 text-red-400" />
+          <span className="text-xs text-slate-400 uppercase tracking-wide">Impending Risk</span>
+        </div>
+        <div 
+          className="text-2xl font-semibold text-red-400"
+          style={{ fontFamily: "JetBrains Mono, monospace" }}
+          data-testid="kpi-impending-risk"
+        >
+          {formatCurrency(impendingRisk, currency)}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-1">Expiring cards detected</p>
+      </Card>
+      
+      <Card className="bg-slate-900 border-sky-500/20 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Target className="w-4 h-4 text-sky-400" />
+          <span className="text-xs text-slate-400 uppercase tracking-wide">Integrity Score</span>
+        </div>
+        <div 
+          className={`text-2xl font-semibold ${integrityScore >= 80 ? 'text-emerald-400' : integrityScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}
+          style={{ fontFamily: "JetBrains Mono, monospace" }}
+          data-testid="kpi-integrity-score"
+        >
+          {integrityScore}%
+        </div>
+        <p className="text-[10px] text-slate-500 mt-1">Guarded / Total Exposure</p>
+      </Card>
+    </div>
+  );
+}
+
 export default function SystemPage() {
   const { isAuthenticated, authLoading } = useMerchant();
+  
+  const statsQuery = useQuery<MerchantStats>({
+    queryKey: ["/api/merchant/stats"],
+    enabled: isAuthenticated,
+  });
 
   if (authLoading) {
     return (
@@ -273,33 +384,22 @@ export default function SystemPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-white mb-2">System Intelligence</h1>
-        <p className="text-slate-400">Decision transparency feed showing automated recovery logic.</p>
+        <h1 className="text-2xl font-semibold text-white mb-2">Financial Command Center</h1>
+        <p className="text-slate-400">Real-time revenue intelligence and recovery metrics.</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 text-center">
-        <div className="bg-slate-900/50 border border-white/5 rounded-md p-4">
-          <div className="flex items-center justify-center gap-2 text-sky-400 mb-1">
-            <Zap className="w-4 h-4" />
-            <span className="text-xs uppercase tracking-wide">Action</span>
-          </div>
-          <p className="text-[10px] text-slate-500">Recovery strategy decisions</p>
+      {statsQuery.isLoading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="bg-slate-900 border-white/5 p-4 animate-slow-pulse">
+              <div className="h-4 w-24 bg-slate-800 rounded mb-3" />
+              <div className="h-8 w-32 bg-slate-800 rounded" />
+            </Card>
+          ))}
         </div>
-        <div className="bg-slate-900/50 border border-white/5 rounded-md p-4">
-          <div className="flex items-center justify-center gap-2 text-slate-500 mb-1">
-            <Activity className="w-4 h-4" />
-            <span className="text-xs uppercase tracking-wide">Discovery</span>
-          </div>
-          <p className="text-[10px] text-slate-500">Ghost user identification</p>
-        </div>
-        <div className="bg-slate-900/50 border border-white/5 rounded-md p-4">
-          <div className="flex items-center justify-center gap-2 text-emerald-500 mb-1">
-            <CheckCircle className="w-4 h-4" />
-            <span className="text-xs uppercase tracking-wide">Success</span>
-          </div>
-          <p className="text-[10px] text-slate-500">Confirmed recoveries</p>
-        </div>
-      </div>
+      ) : statsQuery.data ? (
+        <CFOHeadline stats={statsQuery.data} />
+      ) : null}
 
       <IntelligenceLogFeed />
     </div>
