@@ -21,6 +21,8 @@ interface TelemetryState {
   totalPaymentEvents: number;
   subscriptionLinked: number;
   subscriptionFailed: number;
+  impendingRiskTally: number;
+  impendingCount: number;
 }
 
 // Intelligent Decline Branching: Categorize Stripe decline codes
@@ -175,6 +177,158 @@ function extractPaymentTimingData(invoice: Stripe.Invoice): { dayOfWeek: number;
   };
 }
 
+// Proactive Expiry Detection: Check if card expires this month or next
+function isCardExpiringWithinWindow(expMonth: number, expYear: number): boolean {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1; // JS months are 0-indexed
+  const currentYear = now.getFullYear();
+  
+  // Check if expiring this month
+  if (expYear === currentYear && expMonth === currentMonth) {
+    return true;
+  }
+  
+  // Check if expiring next month (handle year rollover)
+  let nextMonth = currentMonth + 1;
+  let nextYear = currentYear;
+  if (nextMonth > 12) {
+    nextMonth = 1;
+    nextYear = currentYear + 1;
+  }
+  
+  if (expYear === nextYear && expMonth === nextMonth) {
+    return true;
+  }
+  
+  return false;
+}
+
+interface ImpendingRiskResult {
+  email: string;
+  customerName: string;
+  amount: number;
+  subscriptionId: string;
+  customerId: string;
+  expMonth: number;
+  expYear: number;
+}
+
+async function scanForImpendingRisks(
+  stripe: Stripe,
+  merchantId: string,
+  telemetry: TelemetryState
+): Promise<{ risks: ImpendingRiskResult[]; currency: string | null }> {
+  const risks: ImpendingRiskResult[] = [];
+  let detectedCurrency: string | null = null;
+  
+  console.log(`[GHOST HUNTER] Starting PROACTIVE EXPIRY DETECTION for merchant: ${merchantId}`);
+  
+  let hasMore = true;
+  let startingAfter: string | undefined;
+  
+  while (hasMore) {
+    try {
+      const params: Stripe.SubscriptionListParams = {
+        status: 'active',
+        limit: 100,
+        expand: ['data.default_payment_method', 'data.customer'],
+      };
+      if (startingAfter) {
+        params.starting_after = startingAfter;
+      }
+      
+      const subscriptions = await withRetry(() => stripe.subscriptions.list(params));
+      
+      for (const subscription of subscriptions.data) {
+        // Get payment method details
+        const paymentMethod = subscription.default_payment_method;
+        
+        if (!paymentMethod || typeof paymentMethod === 'string') {
+          continue; // Need expanded payment method object
+        }
+        
+        // Only process card payment methods
+        if (paymentMethod.type !== 'card' || !paymentMethod.card) {
+          continue;
+        }
+        
+        const { exp_month, exp_year } = paymentMethod.card;
+        
+        // Check if card is expiring within window
+        if (!isCardExpiringWithinWindow(exp_month, exp_year)) {
+          continue;
+        }
+        
+        // Extract customer details
+        const customer = subscription.customer;
+        let email = 'unknown';
+        let customerName = 'Unknown Customer';
+        
+        if (typeof customer === 'object' && customer) {
+          email = (customer as Stripe.Customer).email || 'unknown';
+          customerName = (customer as Stripe.Customer).name || email || 'Unknown Customer';
+        }
+        
+        // Calculate MRR from subscription items
+        let mrr = 0;
+        for (const item of subscription.items.data) {
+          const price = item.price;
+          if (price.recurring) {
+            const amount = price.unit_amount || 0;
+            const quantity = item.quantity || 1;
+            
+            // Normalize to monthly amount
+            if (price.recurring.interval === 'month') {
+              mrr += amount * quantity;
+            } else if (price.recurring.interval === 'year') {
+              mrr += Math.round((amount * quantity) / 12);
+            } else if (price.recurring.interval === 'week') {
+              mrr += Math.round((amount * quantity) * 4.33);
+            } else if (price.recurring.interval === 'day') {
+              mrr += Math.round((amount * quantity) * 30);
+            }
+          }
+        }
+        
+        // Capture currency from subscription
+        if (!detectedCurrency && subscription.currency) {
+          detectedCurrency = subscription.currency.toLowerCase();
+        }
+        
+        const customerId = typeof customer === 'string' ? customer : customer?.id || 'unknown';
+        
+        risks.push({
+          email,
+          customerName,
+          amount: mrr,
+          subscriptionId: subscription.id,
+          customerId,
+          expMonth: exp_month,
+          expYear: exp_year,
+        });
+        
+        telemetry.impendingCount++;
+        telemetry.impendingRiskTally += mrr;
+        
+        console.log(`[GHOST HUNTER] Impending risk detected: ${email}, MRR: ${(mrr / 100).toFixed(2)}, card expires ${exp_month}/${exp_year}`);
+      }
+      
+      hasMore = subscriptions.has_more;
+      if (hasMore && subscriptions.data.length > 0) {
+        startingAfter = subscriptions.data[subscriptions.data.length - 1].id;
+      }
+      
+    } catch (error: any) {
+      console.error(`[GHOST HUNTER] Error scanning subscriptions for impending risks:`, error.message);
+      break;
+    }
+  }
+  
+  console.log(`[GHOST HUNTER] Proactive scan complete: ${risks.length} impending risks, ${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk`);
+  
+  return { risks, currency: detectedCurrency };
+}
+
 export async function scanMerchant(merchantId: string, forceSync: boolean = false): Promise<ScanResult & { telemetry?: TelemetryState }> {
   const result: ScanResult & { telemetry?: TelemetryState } = {
     merchantId,
@@ -195,6 +349,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     totalPaymentEvents: 0,
     subscriptionLinked: 0,
     subscriptionFailed: 0,
+    impendingRiskTally: 0,
+    impendingCount: 0,
   };
 
   console.log(`[GHOST HUNTER] Starting DEEP HARVEST scan for merchant: ${merchantId}`);
@@ -442,6 +598,46 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   // Check if scan completed without breaking due to errors
   scanCompletedSuccessfully = result.errors.length === 0;
 
+  // PROACTIVE EXPIRY DETECTION: Scan for subscriptions with expiring cards
+  if (scanCompletedSuccessfully) {
+    try {
+      const { risks, currency: impendingCurrency } = await scanForImpendingRisks(stripe, merchantId, telemetry);
+      
+      // Use detected currency from impending scan if invoice scan didn't find one
+      if (!detectedCurrency && impendingCurrency) {
+        detectedCurrency = impendingCurrency;
+      }
+      
+      // Upsert impending ghosts
+      for (const risk of risks) {
+        const purgeAt = new Date();
+        purgeAt.setDate(purgeAt.getDate() + 90);
+        
+        await storage.upsertGhostTarget({
+          merchantId,
+          email: risk.email,
+          customerName: risk.customerName,
+          amount: risk.amount,
+          invoiceId: `impending_${risk.subscriptionId}`, // Use subscription ID as unique identifier
+          purgeAt,
+          status: "impending",
+          failureReason: `card_expiring_${risk.expMonth}_${risk.expYear}`,
+          declineType: null,
+        });
+      }
+      
+      // Update merchant's impending leakage cents
+      if (telemetry.impendingRiskTally > 0) {
+        await storage.updateMerchantImpendingLeakage(merchantId, telemetry.impendingRiskTally);
+        console.log(`[GHOST HUNTER] Impending leakage updated: ${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk from ${telemetry.impendingCount} expiring cards`);
+      }
+      
+    } catch (error: any) {
+      console.error(`[GHOST HUNTER] Proactive scan error:`, error.message);
+      result.errors.push(`Proactive scan failed: ${error.message}`);
+    }
+  }
+
   // Shadow Revenue Calculator: Atomic persistence on successful scan completion
   if (scanCompletedSuccessfully) {
     try {
@@ -483,6 +679,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   console.log(`[GHOST HUNTER] Ghosts found: ${result.ghostsFound.length}`);
   console.log(`[GHOST HUNTER] Revenue at risk: $${(result.totalRevenueAtRisk / 100).toFixed(2)}`);
   console.log(`[GHOST HUNTER] Shadow Revenue (all-time): $${(shadowRevenueTally / 100).toFixed(2)}`);
+  console.log(`[GHOST HUNTER] Impending risks: ${telemetry.impendingCount} cards expiring, $${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk`);
   console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
 

@@ -140,6 +140,7 @@ export interface IStorage {
   incrementMerchantRecovery(id: string, amountCents: number): Promise<Merchant | undefined>;
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
   updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
+  updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined>;
   getHistoricalRevenueStats(merchantId: string): Promise<HistoricalRevenueStats>;
   getMonthlyTrend(merchantId: string): Promise<MonthlyTrendPoint[]>;
   getDailyPulse(merchantId: string): Promise<DailyPulsePoint[]>;
@@ -254,6 +255,15 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(merchants)
       .set(updatePayload)
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined> {
+    const [updated] = await db
+      .update(merchants)
+      .set({ impendingLeakageCents })
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
