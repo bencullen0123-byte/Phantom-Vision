@@ -643,6 +643,33 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Job Log Integration: Fetch recent ghost_hunter system logs with funnel data
+    const recentSystemLogs = await db
+      .select()
+      .from(systemLogs)
+      .where(eq(systemLogs.jobName, "ghost_hunter"))
+      .orderBy(desc(systemLogs.runAt))
+      .limit(10);
+
+    for (const log of recentSystemLogs) {
+      if (log.details) {
+        try {
+          const data = JSON.parse(log.details);
+          if (data.funnel) {
+            logs.push({
+              id: `system-${log.id}`,
+              timestamp: log.runAt,
+              type: "info",
+              message: `Diagnostic: Processed ${data.funnel.total} invoices. ${data.funnel.recurring} linked to subscriptions, ${data.funnel.skipped} excluded.`,
+              amount: null,
+            });
+          }
+        } catch {
+          // Details not valid JSON, skip
+        }
+      }
+    }
+
     // Sort by timestamp descending and limit
     logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     return logs.slice(0, limit);
