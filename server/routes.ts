@@ -282,6 +282,7 @@ export async function registerRoutes(
   // Audit endpoint - runs ghost scan for a merchant (secured by session)
   app.post("/api/audit/run", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
+    const forceSync = req.body?.forceSync === true;
     
     const merchant = await storage.getMerchant(merchantId);
     if (!merchant) {
@@ -291,10 +292,10 @@ export async function registerRoutes(
       });
     }
 
-    console.log(`[AUDIT] Running audit for merchant: ${merchant.id}`);
+    console.log(`[AUDIT] Running audit for merchant: ${merchant.id} (forceSync: ${forceSync})`);
 
     try {
-      const result = await runAuditForMerchant(merchant.id);
+      const result = await runAuditForMerchant(merchant.id, forceSync);
       
       if (result.errors.length > 0) {
         console.error("[AUDIT] Errors during scan:", result.errors);

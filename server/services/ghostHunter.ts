@@ -497,13 +497,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   return result;
 }
 
-export async function runAuditForMerchant(merchantId: string): Promise<{
+export async function runAuditForMerchant(merchantId: string, forceSync: boolean = false): Promise<{
   total_ghosts_found: number;
   total_revenue_at_risk: number;
   oracle_data_points: number;
   errors: string[];
 }> {
-  const scanResult = await scanMerchant(merchantId);
+  const scanResult = await scanMerchant(merchantId, forceSync);
 
   return {
     total_ghosts_found: scanResult.ghostsFound.length,
