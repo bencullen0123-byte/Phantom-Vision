@@ -402,15 +402,31 @@ export class DatabaseStorage implements IStorage {
 
   async getEligibleGhostsForEmail(): Promise<GhostTarget[]> {
     const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
     
-    // Simplified: Return all pending ghosts without timing checks (Oracle timing bypassed)
+    // Fetch both 'pending' (failed payments) and 'impending' (expiring cards)
+    // Conditions:
+    // - Status is pending or impending
+    // - Less than 3 emails sent
+    // - Not purged yet
+    // - Grace period: discovered more than 4 hours ago
+    // - Not emailed in the last 7 days (or never emailed)
     const dbRecords = await db
       .select()
       .from(ghostTargets)
       .where(and(
-        eq(ghostTargets.status, "pending"),
+        or(
+          eq(ghostTargets.status, "pending"),
+          eq(ghostTargets.status, "impending")
+        ),
         lt(ghostTargets.emailCount, 3),
-        sql`${ghostTargets.purgeAt} > ${now}`
+        sql`${ghostTargets.purgeAt} > ${now}`,
+        sql`${ghostTargets.discoveredAt} < ${fourHoursAgo}`,
+        or(
+          isNull(ghostTargets.lastEmailedAt),
+          sql`${ghostTargets.lastEmailedAt} < ${sevenDaysAgo}`
+        )
       ));
     return dbRecords.map(decryptGhostTarget);
   }

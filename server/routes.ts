@@ -545,38 +545,79 @@ export async function registerRoutes(
     }
   });
 
-  // Attribution Proxy Link - tracks clicks and redirects to Stripe invoice
-  // Sets 24-hour attribution window for payment tracking
-  app.get("/api/l/:strikeId", async (req: Request, res: Response) => {
-    const { strikeId } = req.params;
+  // Attribution Proxy Link - tracks clicks and redirects to Stripe
+  // Sets phantom_attribution cookie (24h) and logs click event
+  app.get("/api/l/:targetId", async (req: Request, res: Response) => {
+    const { targetId } = req.params;
     
     // SECURITY: Log only anonymized identifier
-    console.log(`[ATTRIBUTION] Link click received for strike: ${strikeId}`);
+    console.log(`[ATTRIBUTION] Link click received for target: ${targetId}`);
 
     try {
-      const ghost = await storage.getGhostTarget(strikeId);
+      const ghost = await storage.getGhostTarget(targetId);
       
       if (!ghost) {
-        console.warn(`[ATTRIBUTION] Invalid strike ID: ${strikeId}`);
-        // Titanium fallback: redirect to generic Stripe billing portal
+        console.warn(`[ATTRIBUTION] Invalid target ID: ${targetId}`);
         return res.redirect(302, "https://billing.stripe.com");
       }
 
-      // Set attribution flag: payment within next 24 hours is directly attributed
-      const attributionExpiry = new Date();
-      attributionExpiry.setHours(attributionExpiry.getHours() + 24);
+      // Set phantom_attribution cookie (24-hour expiry)
+      const cookieExpiry = new Date();
+      cookieExpiry.setHours(cookieExpiry.getHours() + 24);
       
-      await storage.setGhostAttributionFlag(ghost.id, attributionExpiry);
-      console.log(`[ATTRIBUTION] Flag set for ghost ${ghost.id}, expires: ${attributionExpiry.toISOString()}`);
+      res.cookie("phantom_attribution", targetId, {
+        expires: cookieExpiry,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax"
+      });
 
-      // Build Stripe invoice URL and perform high-performance 302 redirect
+      // Set database attribution flag
+      await storage.setGhostAttributionFlag(ghost.id, cookieExpiry);
+
+      // Log click event to system_logs
+      await storage.createSystemLog({
+        jobName: "email_click",
+        status: "success",
+        details: `Target ${targetId} clicked (status: ${ghost.status})`,
+        errorMessage: null
+      });
+
+      console.log(`[ATTRIBUTION] Cookie set for target ${ghost.id}, expires: ${cookieExpiry.toISOString()}`);
+
+      // Redirect based on status:
+      // - pending (failed payments): redirect to hosted invoice URL
+      // - impending (expiring cards): redirect to customer portal
+      if (ghost.status === "impending") {
+        // For expiring cards, redirect to customer portal to update payment method
+        const stripe = getStripeClient();
+        if (stripe && ghost.stripeCustomerId) {
+          try {
+            const merchant = await storage.getMerchant(ghost.merchantId);
+            if (merchant?.stripeAccountId) {
+              const session = await stripe.billingPortal.sessions.create(
+                {
+                  customer: ghost.stripeCustomerId,
+                  return_url: getBaseUrl(req),
+                },
+                { stripeAccount: merchant.stripeAccountId }
+              );
+              return res.redirect(302, session.url);
+            }
+          } catch (portalError: any) {
+            console.error(`[ATTRIBUTION] Portal creation failed:`, portalError.message);
+          }
+        }
+        // Fallback to generic billing
+        return res.redirect(302, "https://billing.stripe.com");
+      }
+
+      // For pending (failed payments), redirect to hosted invoice
       const stripeInvoiceUrl = `https://invoice.stripe.com/i/${ghost.invoiceId}`;
-      
       return res.redirect(302, stripeInvoiceUrl);
       
     } catch (error: any) {
-      console.error(`[ATTRIBUTION] Error processing strike ${strikeId}:`, error.message);
-      // Titanium fallback: redirect to Stripe billing on any error
+      console.error(`[ATTRIBUTION] Error processing target ${targetId}:`, error.message);
       return res.redirect(302, "https://billing.stripe.com");
     }
   });
