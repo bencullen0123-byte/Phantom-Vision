@@ -83,6 +83,7 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     recoveryType: dbRecord.recoveryType,
     failureReason: dbRecord.failureReason,
     declineType: dbRecord.declineType,
+    stripeCustomerId: dbRecord.stripeCustomerId,
   };
 }
 
@@ -106,6 +107,7 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   recoveredAt?: Date | null;
   failureReason?: string | null;
   declineType?: string | null;
+  stripeCustomerId?: string | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -127,6 +129,7 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     recoveredAt: target.recoveredAt,
     failureReason: target.failureReason,
     declineType: target.declineType,
+    stripeCustomerId: target.stripeCustomerId,
   };
 }
 

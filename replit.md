@@ -44,7 +44,7 @@ Preferred communication style: Simple, everyday language.
 - **Schema Location:** `shared/schema.ts`
 - **Tables:**
   - `merchants` - Encrypted Stripe access tokens with IV, auth tag, totalRecoveredCents, and multi-currency support (defaultCurrency, impendingLeakageCents, totalProtectedCents)
-  - `ghost_targets` - Transient PII (email, amount), status (pending/recovered/exhausted), 90-day purge timestamp, unique invoiceId
+  - `ghost_targets` - Transient PII (email, amount), status (pending/impending/recovered/exhausted), 90-day purge timestamp, unique invoiceId, stripeCustomerId for portal redirects
   - `liquidity_oracle` - Anonymized metadata (business category, timing data)
   - `system_logs` - Heartbeat job monitoring (job name, status, details, error messages)
 
@@ -98,11 +98,21 @@ shared/          # Shared types and schema
 - `STRIPE_SECRET_KEY` - Stripe API secret key
 - `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret for payment confirmation
 
+### The Outreach Pipe (Email & Tracking)
+- **Email Service:** `server/services/pulseMailer.ts` with Resend SDK integration
+- **Templates:**
+  - Recovery (pending): Failed payment notification with invoice link
+  - Protection (impending): Expiring card warning with portal link
+- **Branding:** Uses merchant's `businessName` for "From" and `supportEmail` for "Reply-To"
+- **Attribution Tracking:** `/api/l/:targetId` route sets `phantom_attribution` cookie (24h), logs clicks, redirects to Stripe
+- **Dry-Run Mode:** Logs full HTML to console when Resend is not connected
+
 ### The Sentinel (Autonomous Scheduler)
 - **Ghost Hunter:** Runs every 12 hours at minute 0
-- **Pulse Engine:** Runs every hour at minute 0
+- **Pulse Engine:** Runs every hour at minute 0, processes both pending and impending targets
 - **Defensive Rules:**
-  - 4-hour grace period before emailing new ghosts
+  - 4-hour grace period before emailing new targets
+  - 7-day cooldown between emails to same target
   - Max 3 emails per ghost (then marked as "exhausted")
 - **Health Endpoints:**
   - `GET /api/system/health` - View scheduler status and logs
