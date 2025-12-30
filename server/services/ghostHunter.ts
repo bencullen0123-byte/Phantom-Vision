@@ -175,7 +175,7 @@ function extractPaymentTimingData(invoice: Stripe.Invoice): { dayOfWeek: number;
   };
 }
 
-export async function scanMerchant(merchantId: string): Promise<ScanResult & { telemetry?: TelemetryState }> {
+export async function scanMerchant(merchantId: string, forceSync: boolean = false): Promise<ScanResult & { telemetry?: TelemetryState }> {
   const result: ScanResult & { telemetry?: TelemetryState } = {
     merchantId,
     ghostsFound: [],
@@ -304,7 +304,8 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult & { t
 
           if (customerId) {
             // Dead Ghost Filter: only process if customer has active/past_due subscription
-            const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
+            // Force-Mode Toggle: bypass subscription check when forceSync is true
+            const hasActiveSub = forceSync ? true : await checkCustomerHasActiveSubscription(stripe, customerId);
 
             if (hasActiveSub) {
               telemetry.subscriptionLinked++;
