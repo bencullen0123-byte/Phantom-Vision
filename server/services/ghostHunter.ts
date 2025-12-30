@@ -287,6 +287,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult & { t
       for (const invoice of invoices.data) {
         totalInvoicesScanned++;
         telemetry.recordsProcessed++;
+        telemetry.totalPaymentEvents++;
 
         // THROTTLE: Delay every THROTTLE_BATCH_SIZE records
         if (telemetry.recordsProcessed % THROTTLE_BATCH_SIZE === 0) {
@@ -306,6 +307,7 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult & { t
             const hasActiveSub = await checkCustomerHasActiveSubscription(stripe, customerId);
 
             if (hasActiveSub) {
+              telemetry.subscriptionLinked++;
               // OVERFLOW RULE: Check if we still have capacity before ingesting new ghost
               // Note: We check if this invoice already exists - updates don't count against capacity
               const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
@@ -374,6 +376,9 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult & { t
               }
 
               console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
+            } else {
+              telemetry.subscriptionFailed++;
+              console.log('[FORENSIC] Invoice ' + invoice.id + ' failed subscription check for customer ' + customerId);
             }
           }
         } else if (invoice.status === "paid") {
