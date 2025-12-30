@@ -666,6 +666,7 @@ export class DatabaseStorage implements IStorage {
     type: "discovery" | "action" | "success" | "info";
     message: string;
     amount: number | null;
+    isDirect?: boolean;
   }[]> {
     const ghosts = await this.getGhostTargetsByMerchant(merchantId);
     
@@ -675,6 +676,7 @@ export class DatabaseStorage implements IStorage {
       type: "discovery" | "action" | "success" | "info";
       message: string;
       amount: number | null;
+      isDirect?: boolean;
     }[] = [];
 
     for (const ghost of ghosts) {
@@ -701,13 +703,27 @@ export class DatabaseStorage implements IStorage {
 
       // Recovery success event
       if (ghost.status === "recovered" && ghost.recoveredAt) {
-        const attribution = ghost.recoveryType === "direct" ? "Direct attribution confirmed" : "Organic recovery detected";
+        const isDirect = ghost.recoveryType === "direct";
+        const attribution = isDirect ? "Direct attribution confirmed" : "Organic recovery detected";
         logs.push({
           id: `${ghost.id}-recovery`,
           timestamp: ghost.recoveredAt,
           type: "success",
           message: `${attribution} - Payment received for invoice ${ghost.invoiceId.slice(0, 12)}...`,
           amount: ghost.amount,
+          isDirect,
+        });
+      }
+
+      // Protection success event
+      if (ghost.status === "protected" && ghost.recoveredAt) {
+        logs.push({
+          id: `${ghost.id}-protection`,
+          timestamp: ghost.recoveredAt,
+          type: "success",
+          message: `Proactive protection confirmed - Card updated before expiration for invoice ${ghost.invoiceId.slice(0, 12)}...`,
+          amount: ghost.amount,
+          isDirect: true,
         });
       }
 

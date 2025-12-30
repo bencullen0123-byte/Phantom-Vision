@@ -85,14 +85,22 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<Webhoo
   const currency = merchant?.defaultCurrency || 'gbp';
   const formattedAmount = formatCentsToDisplay(ghost.amount, currency);
 
-  // Victory Log - Log to system_logs for Intelligence Feed
+  // Victory Log - Structured payload for Intelligence Feed
+  const victoryPayload = {
+    type: "recovery",
+    direct: recoveryType === "direct",
+    amount: ghost.amount,
+    currency: currency,
+    invoiceId: invoice.id,
+    ghostId: ghost.id,
+  };
   await storage.createSystemLog({
     jobName: "recovery_victory",
     status: "success",
-    details: `Revenue Recovered: ${formattedAmount} (${recoveryType})`,
+    details: JSON.stringify(victoryPayload),
     errorMessage: null,
   });
-  console.log(`[WEBHOOK] Victory logged: ${formattedAmount} recovered (${recoveryType})`);
+  console.log(`[WEBHOOK] Victory logged: ${formattedAmount} recovered (${recoveryType})`, victoryPayload);
 
   return {
     success: true,
@@ -148,14 +156,22 @@ export async function handleSubscriptionUpdated(subscription: Stripe.Subscriptio
   const currency = merchant?.defaultCurrency || 'gbp';
   const formattedAmount = formatCentsToDisplay(ghost.amount, currency);
 
-  // Victory Log - Log to system_logs for Intelligence Feed
+  // Victory Log - Structured payload for Intelligence Feed
+  const victoryPayload = {
+    type: "protection",
+    direct: true,
+    amount: ghost.amount,
+    currency: currency,
+    subscriptionId: subscription.id,
+    ghostId: ghost.id,
+  };
   await storage.createSystemLog({
     jobName: "protection_victory",
     status: "success",
-    details: `Revenue Protected: ${formattedAmount} (proactive card update)`,
+    details: JSON.stringify(victoryPayload),
     errorMessage: null,
   });
-  console.log(`[WEBHOOK] Victory logged: ${formattedAmount} protected`);
+  console.log(`[WEBHOOK] Victory logged: ${formattedAmount} protected`, victoryPayload);
 
   return {
     success: true,

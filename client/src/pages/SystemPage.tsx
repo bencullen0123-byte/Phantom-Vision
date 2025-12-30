@@ -1,9 +1,10 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target } from "lucide-react";
+import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { ForensicFunnel, parseDiagnosticMessage } from "@/components/ForensicFunnel";
 
 interface IntelligenceLog {
@@ -12,6 +13,7 @@ interface IntelligenceLog {
   type: "discovery" | "action" | "success" | "info";
   message: string;
   amount: number | null;
+  isDirect?: boolean;
 }
 
 interface MerchantStats {
@@ -176,14 +178,14 @@ function IntelligenceLogFeed() {
           {logsQuery.data.map((log) => (
           <div 
             key={log.id}
-            className="flex items-start gap-3 py-2 px-4 hover:bg-white/[0.02] transition-colors"
+            className={`flex items-start gap-3 py-2 px-4 hover:bg-white/[0.02] transition-colors ${log.isDirect ? 'bg-emerald-950/20 border-l-2 border-emerald-500/50' : ''}`}
             data-testid={`log-entry-${log.id}`}
           >
             <span className={`mt-0.5 ${getLogColorClass(log.type)}`}>
               {getLogIcon(log.type)}
             </span>
             <div className="flex-1 min-w-0">
-              <div className="flex items-baseline gap-3 mb-0.5">
+              <div className="flex items-center gap-3 mb-0.5 flex-wrap">
                 <span className="text-[10px] text-slate-600">
                   {formatTimestamp(log.timestamp)}
                 </span>
@@ -191,6 +193,16 @@ function IntelligenceLogFeed() {
                   <span className={`text-xs ${log.type === "success" ? "text-emerald-500" : "text-slate-400"}`}>
                     {formatCurrency(log.amount)}
                   </span>
+                )}
+                {log.isDirect && (
+                  <Badge 
+                    variant="outline" 
+                    className="h-5 text-[10px] border-emerald-500/50 text-emerald-400 bg-emerald-500/10 gap-1"
+                    data-testid="badge-pulse-verified"
+                  >
+                    <BadgeCheck className="w-3 h-3" />
+                    Pulse-Verified
+                  </Badge>
                 )}
               </div>
               <p className={`text-xs leading-relaxed ${getLogColorClass(log.type)}`}>
