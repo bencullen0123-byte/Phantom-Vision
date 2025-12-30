@@ -18,6 +18,9 @@ interface TelemetryState {
   lastEncryptMs: number;
   totalUpsertMs: number;
   upsertCount: number;
+  totalPaymentEvents: number;
+  subscriptionLinked: number;
+  subscriptionFailed: number;
 }
 
 // Intelligent Decline Branching: Categorize Stripe decline codes
@@ -189,6 +192,9 @@ export async function scanMerchant(merchantId: string): Promise<ScanResult & { t
     lastEncryptMs: 0,
     totalUpsertMs: 0,
     upsertCount: 0,
+    totalPaymentEvents: 0,
+    subscriptionLinked: 0,
+    subscriptionFailed: 0,
   };
 
   console.log(`[GHOST HUNTER] Starting DEEP HARVEST scan for merchant: ${merchantId}`);
