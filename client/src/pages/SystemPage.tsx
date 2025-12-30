@@ -19,6 +19,78 @@ function formatCurrency(cents: number): string {
   }).format(cents / 100);
 }
 
+interface FunnelData {
+  total: number;
+  recurring: number;
+  skipped: number;
+  ghosts: number;
+}
+
+function parseDiagnosticMessage(message: string): FunnelData | null {
+  const totalMatch = message.match(/Processed (\d+) invoices/);
+  const recurringMatch = message.match(/(\d+) linked to subscriptions/);
+  const skippedMatch = message.match(/(\d+) excluded/);
+  
+  if (!totalMatch || !recurringMatch || !skippedMatch) {
+    return null;
+  }
+  
+  const total = parseInt(totalMatch[1], 10);
+  const recurring = parseInt(recurringMatch[1], 10);
+  const skipped = parseInt(skippedMatch[1], 10);
+  const ghosts = recurring - skipped;
+  
+  return { total, recurring, skipped, ghosts: ghosts > 0 ? ghosts : 0 };
+}
+
+function ForensicFunnel({ data }: { data: FunnelData }) {
+  const hasGhosts = data.ghosts > 0;
+  
+  return (
+    <div className="flex-shrink-0 bg-slate-900/50 border border-white/5 rounded-md p-4 mb-4" data-testid="forensic-funnel">
+      <div className="flex items-center gap-2 mb-3">
+        <Activity className="w-4 h-4 text-slate-500" />
+        <span className="text-xs text-slate-400 uppercase tracking-wide">Forensic Funnel</span>
+      </div>
+      
+      <div className="flex gap-2">
+        <div className="flex-1 bg-slate-800 rounded-md p-3 text-center">
+          <div 
+            className="text-xl text-slate-400 mb-1" 
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="funnel-total"
+          >
+            {data.total.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wide">Invoices Scanned</div>
+        </div>
+        
+        <div className="flex-1 bg-sky-900/40 rounded-md p-3 text-center">
+          <div 
+            className="text-xl text-sky-400 mb-1" 
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="funnel-recurring"
+          >
+            {data.recurring.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wide">Subscription Linked</div>
+        </div>
+        
+        <div className={`flex-1 bg-emerald-900/40 rounded-md p-3 text-center ${hasGhosts ? 'animate-slow-pulse' : ''}`}>
+          <div 
+            className="text-xl text-emerald-500 mb-1" 
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="funnel-ghosts"
+          >
+            {data.ghosts.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wide">Actionable Ghosts</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatTimestamp(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleString("en-GB", {
@@ -118,25 +190,31 @@ function IntelligenceLogFeed() {
     );
   }
 
+  const diagnosticLog = logsQuery.data.find(log => log.message.startsWith('Diagnostic:'));
+  const funnelData = diagnosticLog ? parseDiagnosticMessage(diagnosticLog.message) : null;
+
   return (
-    <div className="min-h-[400px] bg-slate-950 border border-white/5 rounded-md overflow-hidden">
-      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/5 bg-slate-900/50">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-slate-500" />
-          <span className="text-sm text-slate-400" style={{ fontFamily: "JetBrains Mono, monospace" }}>
-            intelligence.log
+    <div className="space-y-4">
+      {funnelData && <ForensicFunnel data={funnelData} />}
+      
+      <div className="min-h-[400px] bg-slate-950 border border-white/5 rounded-md overflow-hidden">
+        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/5 bg-slate-900/50">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-slate-500" />
+            <span className="text-sm text-slate-400" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+              intelligence.log
+            </span>
+          </div>
+          <span className="text-xs text-slate-600" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+            {logsQuery.data.length} entries
           </span>
         </div>
-        <span className="text-xs text-slate-600" style={{ fontFamily: "JetBrains Mono, monospace" }}>
-          {logsQuery.data.length} entries
-        </span>
-      </div>
-      
-      <div 
-        className="max-h-[500px] overflow-y-auto divide-y divide-white/[0.02]"
-        style={{ fontFamily: "JetBrains Mono, monospace" }}
-      >
-        {logsQuery.data.map((log) => (
+        
+        <div 
+          className="max-h-[500px] overflow-y-auto divide-y divide-white/[0.02]"
+          style={{ fontFamily: "JetBrains Mono, monospace" }}
+        >
+          {logsQuery.data.map((log) => (
           <div 
             key={log.id}
             className="flex items-start gap-3 py-2 px-4 hover:bg-white/[0.02] transition-colors"
@@ -162,6 +240,7 @@ function IntelligenceLogFeed() {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
