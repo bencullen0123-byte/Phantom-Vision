@@ -520,11 +520,12 @@ export async function registerRoutes(
   });
 
   // Manual trigger endpoints for testing
-  app.post("/api/sentinel/ghost-hunter", async (_req: Request, res: Response) => {
-    console.log("[SENTINEL] Manual Ghost Hunter trigger");
+  app.post("/api/sentinel/ghost-hunter", async (req: Request, res: Response) => {
+    const forceSync = req.body?.forceSync === true;
+    console.log(`[SENTINEL] Manual Ghost Hunter trigger (forceSync: ${forceSync})`);
     try {
-      await runGhostHunterJob();
-      return res.json({ status: "success", message: "Ghost Hunter job triggered" });
+      await runGhostHunterJob(forceSync);
+      return res.json({ status: "success", message: "Ghost Hunter job triggered", forceSync });
     } catch (error: any) {
       return res.status(500).json({ status: "error", error: error.message });
     }

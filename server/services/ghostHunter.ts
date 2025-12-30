@@ -271,8 +271,11 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     batchNumber++;
     
     try {
+      // Fetch ALL invoices - no status filter, no time filter
+      // This ensures we see every invoice including open, paid, draft, void, uncollectible
       const params: Stripe.InvoiceListParams = {
         limit: 100, // Maximum allowed by Stripe API
+        expand: ['data.customer'], // Pre-expand customer for faster lookups
       };
       if (startingAfter) {
         params.starting_after = startingAfter;

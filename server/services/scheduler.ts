@@ -26,8 +26,8 @@ async function logJobResult(result: JobResult): Promise<void> {
   }
 }
 
-async function runGhostHunterJob(): Promise<void> {
-  console.log("[SENTINEL] Ghost Hunter heartbeat triggered");
+async function runGhostHunterJob(forceSync: boolean = false): Promise<void> {
+  console.log(`[SENTINEL] Ghost Hunter heartbeat triggered (forceSync: ${forceSync})`);
   
   // Pre-flight: Attempt to acquire atomic lock
   const lockResult = await storage.acquireJobLock("ghost_hunter", LOCK_TTL_MINUTES);
@@ -80,7 +80,7 @@ async function runGhostHunterJob(): Promise<void> {
     
     for (const merchant of merchants) {
       try {
-        const result = await scanMerchant(merchant.id);
+        const result = await scanMerchant(merchant.id, forceSync);
         totalGhosts += result.ghostsFound.length;
         totalOraclePoints += result.oracleDataPoints;
         
