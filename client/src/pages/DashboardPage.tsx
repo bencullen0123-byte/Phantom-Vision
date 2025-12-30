@@ -44,7 +44,7 @@ function DeepHarvestGate() {
 
   const auditMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/audit/run");
+      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
       return res.json();
     },
     onSuccess: (data) => {
