@@ -104,8 +104,30 @@ shared/          # Shared types and schema
   - Recovery (pending): Failed payment notification with invoice link
   - Protection (impending): Expiring card warning with portal link
 - **Branding:** Uses merchant's `businessName` for "From" and `supportEmail` for "Reply-To"
-- **Attribution Tracking:** `/api/l/:targetId` route sets `phantom_attribution` cookie (24h), logs clicks, redirects to Stripe
+- **Attribution Tracking:** `/api/l/:targetId` route sets `attribution_expires_at` (24h window) in database, logs clicks, redirects to Stripe
 - **Dry-Run Mode:** Logs full HTML to console when Resend is not connected
+
+### The Handshake (Webhook Infrastructure)
+- **Endpoint:** `/api/webhooks/stripe` with signature verification via `STRIPE_WEBHOOK_SECRET`
+- **Handler:** `server/services/webhookHandler.ts`
+- **Events Processed:**
+  - `invoice.paid` - Marks ghost as "recovered", increments `totalRecoveredCents`
+  - `customer.subscription.updated` - Marks impending ghost as "protected", increments `totalProtectedCents`
+- **Attribution Logic:**
+  - Compares `current_time` against `attribution_expires_at` timestamp
+  - If within 24h window → "direct" (PHANTOM-attributed recovery)
+  - If outside window or null → "organic" (independent payment)
+- **Victory Logging:** Writes structured JSON to `system_logs`:
+  ```json
+  { "type": "recovery"|"protection", "direct": boolean, "amount": number, "currency": string }
+  ```
+
+### Ghost Target Status Flow
+- **pending** → Failed payment detected, awaiting recovery emails
+- **impending** → Expiring card detected, awaiting protection emails  
+- **recovered** → Payment received (via webhook)
+- **protected** → Card updated proactively (via webhook)
+- **exhausted** → Max 3 emails sent without success, no further outreach
 
 ### The Sentinel (Autonomous Scheduler)
 - **Ghost Hunter:** Runs every 12 hours at minute 0
@@ -125,3 +147,25 @@ shared/          # Shared types and schema
 - **Rate Limit Detection:** Checks statusCode 429, StripeRateLimitError type, rate_limit code
 - **Telemetry Heartbeat:** Logs every 50 records - index, RSS memory, encrypt timing, avg UPSERT latency
 - **Final Summary:** Writes to system_logs with total records, duration, peak RSS, avg UPSERT latency
+
+### Frontend Pages
+- **DashboardPage** (`/`) - Landing and connection status
+- **SystemPage** (`/system`) - Financial Command Center with CFO KPIs
+- **RecoveriesPage** (`/recoveries`) - Ghost target management
+- **GrowthPage** (`/growth`) - Analytics and trends
+- **SettingsPage** (`/settings`) - Merchant configuration
+
+### Financial Command Center (SystemPage)
+- **CFO Headline KPIs:**
+  - Revenue Guarded (Protected + Recovered)
+  - Shadow Leakage (all-time leaked revenue)
+  - Impending Risk (expiring cards detected)
+  - Integrity Score (Guarded / Total Exposure %)
+- **Intelligence Log Feed:** Real-time system logs with 10s auto-refresh
+- **Pulse-Verified Badge:** Emerald glow indicator for direct PHANTOM-attributed recoveries
+- **Social Sharing:**
+  - Share button on individual Pulse-Verified log entries
+  - "Share Integrity Report" button generates social media post with revenue metrics
+  - `generateSuccessPost()` - Formats individual recovery wins
+  - `generateIntegritySharePost()` - Formats overall integrity report
+  - Clipboard copy with toast confirmation
