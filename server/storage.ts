@@ -378,22 +378,15 @@ export class DatabaseStorage implements IStorage {
 
   async getEligibleGhostsForEmail(): Promise<GhostTarget[]> {
     const now = new Date();
-    const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
     
-    // Intelligent Decline Branching: Hard declines bypass 4-hour grace period (immediate priority)
+    // Simplified: Return all pending ghosts without timing checks (Oracle timing bypassed)
     const dbRecords = await db
       .select()
       .from(ghostTargets)
       .where(and(
         eq(ghostTargets.status, "pending"),
         lt(ghostTargets.emailCount, 3),
-        sql`${ghostTargets.purgeAt} > ${now}`,
-        or(
-          // Standard path: Soft declines or null respect 4-hour grace period
-          lt(ghostTargets.discoveredAt, fourHoursAgo),
-          // Priority path: Hard declines bypass grace period
-          eq(ghostTargets.declineType, "hard")
-        )
+        sql`${ghostTargets.purgeAt} > ${now}`
       ));
     return dbRecords.map(decryptGhostTarget);
   }
