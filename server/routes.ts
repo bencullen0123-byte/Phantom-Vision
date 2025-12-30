@@ -104,6 +104,18 @@ export async function registerRoutes(
     });
   });
 
+  // Logout endpoint - destroys session and clears cookies
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("[AUTH] Session destruction error:", err);
+        return res.status(500).json({ status: "error", message: "Logout failed" });
+      }
+      res.clearCookie("connect.sid");
+      return res.json({ status: "ok", message: "Logged out successfully" });
+    });
+  });
+
   // Success endpoint - clean JSON response after OAuth
   app.get("/api/auth/success", (req: Request, res: Response) => {
     const { merchant_id } = req.query;

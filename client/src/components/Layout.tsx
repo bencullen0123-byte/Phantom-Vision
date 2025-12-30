@@ -1,6 +1,9 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, TrendingUp, Settings, DollarSign, Terminal } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Settings, DollarSign, Terminal, LogOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+import { useMerchant } from "@/context/MerchantContext";
 
 interface NavItem {
   label: string;
@@ -37,6 +40,17 @@ function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const { isAuthenticated } = useMerchant();
+
+  const handleLogout = async () => {
+    try {
+      await apiRequest("POST", "/api/auth/logout");
+      // Reload page to clear all state
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-obsidian text-slate-200 font-sans">
@@ -71,6 +85,17 @@ export default function Layout({ children }: { children: ReactNode }) {
               >
                 v1.0.0
               </span>
+              {isAuthenticated && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleLogout}
+                  className="text-slate-400 hover:text-white"
+                  data-testid="button-logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </Button>
+              )}
             </div>
           </div>
         </div>
