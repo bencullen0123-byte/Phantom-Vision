@@ -37,7 +37,9 @@ export type InsertMerchant = z.infer<typeof insertMerchantSchema>;
 export type Merchant = typeof merchants.$inferSelect;
 
 // Ghost targets table - stores transient PII for recovery
-// Status values: 'pending', 'recovered', 'exhausted'
+// Status values: 'pending', 'recovered', 'exhausted', 'impending'
+// - 'pending': ghost user with failed payment requiring recovery
+// - 'impending': proactive detection - active subscription with expiring card
 // PII (email, customerName) is encrypted with AES-256-GCM before storage
 export const ghostTargets = pgTable("ghost_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
