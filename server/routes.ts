@@ -622,6 +622,73 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================================
+  // DEV-ONLY: Test Merchant Onboarding
+  // ============================================================
+  app.post("/api/dev/onboard-test-merchant", async (req: Request, res: Response) => {
+    // Safety check: Only allow in development
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ 
+        error: "This endpoint is not available in production" 
+      });
+    }
+
+    const testKey = process.env.TEST_MERCHANT_STRIPE_KEY;
+    if (!testKey) {
+      return res.status(500).json({ 
+        error: "TEST_MERCHANT_STRIPE_KEY is not configured" 
+      });
+    }
+
+    try {
+      // Check if test merchant already exists
+      const existing = await storage.getMerchantByStripeUserId("acct_test_merchant_B");
+      if (existing) {
+        return res.json({
+          status: "already_exists",
+          merchantId: existing.id,
+          message: "Test merchant already onboarded"
+        });
+      }
+
+      // Encrypt the test key using existing vault
+      const { encryptedData, iv, tag } = encrypt(testKey);
+
+      // Create the test merchant record
+      const merchant = await storage.createMerchant({
+        stripeUserId: "acct_test_merchant_B",
+        encryptedToken: encryptedData,
+        iv: iv,
+        tag: tag,
+        businessName: "Found Factory Test Merchant",
+      });
+
+      // Verify the bridge by making a simple Stripe call
+      const testStripe = new Stripe(testKey, {
+        apiVersion: "2025-12-15.clover",
+      });
+
+      const customers = await testStripe.customers.list({ limit: 1 });
+      
+      console.log(`[DEV] Test merchant onboarded: ${merchant.id}`);
+      console.log(`[DEV] Stripe bridge verified: ${customers.data.length} customer(s) found`);
+
+      return res.json({
+        status: "success",
+        merchantId: merchant.id,
+        bridgeVerified: true,
+        customersFound: customers.data.length
+      });
+
+    } catch (error: any) {
+      console.error("[DEV] Test merchant onboarding failed:", error.message);
+      return res.status(500).json({
+        error: "Onboarding failed",
+        details: error.message
+      });
+    }
+  });
+
   // Start the Sentinel scheduler
   startScheduler();
 
