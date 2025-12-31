@@ -6,6 +6,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import MonthlyTrendChart from "@/components/charts/MonthlyTrendChart";
 import DailyPulseChart from "@/components/charts/DailyPulseChart";
+import LeakageDonut from "@/components/charts/LeakageDonut";
 
 function ConnectStripeGate() {
   return (
@@ -239,7 +240,14 @@ function ForensicCharts() {
 function DashboardMetrics() {
   return (
     <div className="space-y-8">
-      <MoneyHero />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <MoneyHero />
+        </div>
+        <div className="lg:col-span-1">
+          <LeakageDonut />
+        </div>
+      </div>
       <ForensicCharts />
     </div>
   );

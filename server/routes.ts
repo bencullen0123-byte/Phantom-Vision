@@ -465,6 +465,8 @@ export async function registerRoutes(
         recoveredAt: ghost.recoveredAt,
         recoveryType: ghost.recoveryType,
         declineType: ghost.declineType,
+        failureCode: ghost.failureCode,
+        failureMessage: ghost.failureMessage,
       }));
 
       return res.json(response);
@@ -473,6 +475,47 @@ export async function registerRoutes(
       return res.status(500).json({
         status: "error",
         message: "Failed to retrieve ghost targets",
+        error: error.message
+      });
+    }
+  });
+
+  // Leakage Forensics - aggregated failure categories for donut chart
+  app.get("/api/merchant/leakage-forensics", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const ghosts = await storage.getGhostTargetsByMerchant(merchantId);
+      
+      // Filter to active ghosts only (pending or impending)
+      const activeGhosts = ghosts.filter(g => g.status === "pending" || g.status === "impending");
+      
+      // Import dynamically to avoid circular deps
+      const { aggregateByCategory, getCategoryRecoverability } = await import("@shared/leakageCategories");
+      const categoryData = aggregateByCategory(activeGhosts);
+      
+      // Calculate total value
+      const totalValue = categoryData.reduce((sum, cat) => sum + cat.value, 0);
+      
+      // Find dominant category for insight
+      const dominant = categoryData[0];
+      let insight = "";
+      if (dominant) {
+        const recoverability = getCategoryRecoverability(dominant.category);
+        insight = `${dominant.percentage}% of your leakage is '${dominant.category}'. These are ${recoverability}% recoverable with Pulse Retries.`;
+      }
+
+      return res.json({
+        categories: categoryData,
+        totalValue,
+        activeGhostCount: activeGhosts.length,
+        insight,
+      });
+    } catch (error: any) {
+      console.error("[FORENSICS] Failed to get leakage forensics:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve leakage forensics",
         error: error.message
       });
     }
