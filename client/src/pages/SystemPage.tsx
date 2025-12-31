@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useMerchant } from "@/context/MerchantContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck, Share2, Copy, RefreshCw, Link2, Link2Off } from "lucide-react";
+import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck, Share2, Copy, RefreshCw, Link2, Link2Off, FlaskConical } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -150,6 +151,95 @@ function BridgeStatus() {
         Re-check
       </Button>
     </Card>
+  );
+}
+
+interface SeederResponse {
+  success: boolean;
+  productId: string;
+  priceId: string;
+  created: {
+    ghosts: number;
+    risks: number;
+    successes: number;
+  };
+  errors: string[];
+}
+
+function FactoryTrigger() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [statusText, setStatusText] = useState("Seed Test Scenarios");
+
+  // Hide in production
+  if (import.meta.env.MODE === "production") {
+    return null;
+  }
+
+  const runFactory = async () => {
+    setIsSeeding(true);
+    
+    try {
+      // Step 1: Seed scenarios
+      setStatusText("Manufacturing Ghosts...");
+      const seedRes = await fetch("/api/dev/seed-scenarios", { method: "POST" });
+      const seedData: SeederResponse = await seedRes.json();
+      
+      if (!seedRes.ok) {
+        throw new Error(seedData.errors?.[0] || "Seeding failed");
+      }
+
+      // Step 2: Trigger audit/Ghost Hunter
+      setStatusText("Flooding Stripe...");
+      const auditRes = await fetch("/api/audit/trigger", { method: "POST" });
+      
+      if (!auditRes.ok) {
+        const auditErr = await auditRes.json();
+        throw new Error(auditErr.error || "Audit trigger failed");
+      }
+
+      // Step 3: Refresh all relevant queries
+      setStatusText("Refreshing data...");
+      await queryClient.invalidateQueries({ queryKey: ["/api/merchant/logs"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/ghosts"] });
+
+      // Calculate total scenarios
+      const total = seedData.created.ghosts + seedData.created.risks + seedData.created.successes;
+      
+      toast({
+        title: "Factory Success",
+        description: `${total} scenarios manufactured and discovered.`,
+      });
+
+    } catch (err: any) {
+      toast({
+        title: "Factory Failed",
+        description: err.message || "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSeeding(false);
+      setStatusText("Seed Test Scenarios");
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      onClick={runFactory}
+      disabled={isSeeding}
+      className="border-violet-500/50 text-violet-400 gap-2"
+      data-testid="button-seed-scenarios"
+    >
+      {isSeeding ? (
+        <Loader2 className="w-4 h-4 animate-spin" />
+      ) : (
+        <FlaskConical className="w-4 h-4" />
+      )}
+      {statusText}
+    </Button>
   );
 }
 
@@ -489,7 +579,10 @@ export default function SystemPage() {
         <p className="text-slate-400">Real-time revenue intelligence and recovery metrics.</p>
       </div>
 
-      <BridgeStatus />
+      <div className="flex items-center gap-4 flex-wrap">
+        <BridgeStatus />
+        <FactoryTrigger />
+      </div>
 
       {statsQuery.isLoading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
