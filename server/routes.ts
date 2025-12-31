@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { encrypt, selfTest } from "./utils/crypto";
+import { encrypt, decrypt, selfTest } from "./utils/crypto";
 import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent } from "./services/webhookHandler";
@@ -619,6 +619,60 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error(`[ATTRIBUTION] Error processing target ${targetId}:`, error.message);
       return res.redirect(302, "https://billing.stripe.com");
+    }
+  });
+
+  // ============================================================
+  // DEV-ONLY: Bridge Status Check
+  // ============================================================
+  app.get("/api/dev/bridge-status/:merchantId", async (req: Request, res: Response) => {
+    // Safety check: Only allow in development
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ 
+        error: "This endpoint is not available in production" 
+      });
+    }
+
+    const { merchantId } = req.params;
+
+    try {
+      const merchant = await storage.getMerchant(merchantId);
+      if (!merchant) {
+        return res.status(404).json({
+          status: "error",
+          error: "Merchant not found"
+        });
+      }
+
+      // Decrypt the stored token
+      const decryptedKey = decrypt(
+        merchant.encryptedToken,
+        merchant.iv,
+        merchant.tag
+      );
+
+      // Test the Stripe connection
+      const testStripe = new Stripe(decryptedKey, {
+        apiVersion: "2025-12-15.clover",
+      });
+
+      const customers = await testStripe.customers.list({ limit: 1 });
+
+      return res.json({
+        status: "active",
+        merchantId: merchant.id,
+        businessName: merchant.businessName || "Unknown",
+        customersFound: customers.data.length,
+        checkedAt: new Date().toISOString()
+      });
+
+    } catch (error: any) {
+      console.error(`[DEV] Bridge check failed for ${merchantId}:`, error.message);
+      return res.status(500).json({
+        status: "broken",
+        merchantId,
+        error: error.message
+      });
     }
   });
 

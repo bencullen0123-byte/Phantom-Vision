@@ -1,6 +1,6 @@
 import { useMerchant } from "@/context/MerchantContext";
-import { useQuery } from "@tanstack/react-query";
-import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck, Share2, Copy } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Terminal, Activity, Zap, CheckCircle, Info, Shield, AlertTriangle, TrendingUp, Target, BadgeCheck, Share2, Copy, RefreshCw, Link2, Link2Off } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -62,6 +62,96 @@ function generateIntegritySharePost(revenueGuarded: number, integrityScore: numb
   return `Revenue Integrity Report: ${formattedAmount} protected with ${integrityScore}% integrity score. Powered by PHANTOM Revenue Intelligence.`;
 }
 
+// Test Merchant ID from Task 0.2
+const TEST_MERCHANT_ID = "8543bb9f-cda8-4631-951d-70fc7c01ec01";
+
+interface BridgeStatusResponse {
+  status: "active" | "broken" | "error";
+  merchantId?: string;
+  businessName?: string;
+  customersFound?: number;
+  checkedAt?: string;
+  error?: string;
+}
+
+function BridgeStatus() {
+  const queryClient = useQueryClient();
+  
+  const bridgeQuery = useQuery<BridgeStatusResponse>({
+    queryKey: ["/api/dev/bridge-status", TEST_MERCHANT_ID],
+    queryFn: async () => {
+      const res = await fetch(`/api/dev/bridge-status/${TEST_MERCHANT_ID}`);
+      return res.json();
+    },
+    staleTime: 30000,
+    retry: false,
+  });
+
+  const handleRecheck = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/dev/bridge-status", TEST_MERCHANT_ID] });
+  };
+
+  // Loading state
+  if (bridgeQuery.isLoading) {
+    return (
+      <Card className="bg-slate-900 border-slate-700 p-3 flex items-center gap-3" data-testid="bridge-status-loading">
+        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+        <span className="text-sm text-slate-400">Checking Bridge...</span>
+      </Card>
+    );
+  }
+
+  // Success state
+  if (bridgeQuery.data?.status === "active") {
+    return (
+      <Card className="bg-slate-900 border-emerald-500/30 p-3 flex items-center justify-between gap-3" data-testid="bridge-status-active">
+        <div className="flex items-center gap-3">
+          <Link2 className="w-4 h-4 text-emerald-400" />
+          <Badge variant="outline" className="border-emerald-500/50 text-emerald-400 bg-emerald-500/10">
+            Bridge Active
+          </Badge>
+          <span className="text-sm text-slate-300">
+            {bridgeQuery.data.businessName} Connected
+          </span>
+        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={handleRecheck}
+          className="text-slate-500"
+          data-testid="button-recheck-bridge"
+        >
+          <RefreshCw className="w-4 h-4" />
+        </Button>
+      </Card>
+    );
+  }
+
+  // Failure state
+  return (
+    <Card className="bg-slate-900 border-red-500/30 p-3 flex items-center justify-between gap-3" data-testid="bridge-status-broken">
+      <div className="flex items-center gap-3">
+        <Link2Off className="w-4 h-4 text-red-400" />
+        <Badge variant="outline" className="border-red-500/50 text-red-400 bg-red-500/10">
+          Bridge Broken
+        </Badge>
+        <span className="text-sm text-slate-400">
+          {bridgeQuery.data?.error || bridgeQuery.error?.message || "Connection failed"}
+        </span>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleRecheck}
+        className="border-red-500/50 text-red-400 gap-2"
+        data-testid="button-recheck-bridge"
+      >
+        <RefreshCw className="w-3 h-3" />
+        Re-check
+      </Button>
+    </Card>
+  );
+}
 
 function formatTimestamp(dateStr: string): string {
   const date = new Date(dateStr);
@@ -398,6 +488,8 @@ export default function SystemPage() {
         <h1 className="text-2xl font-semibold text-white mb-2">Financial Command Center</h1>
         <p className="text-slate-400">Real-time revenue intelligence and recovery metrics.</p>
       </div>
+
+      <BridgeStatus />
 
       {statsQuery.isLoading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
