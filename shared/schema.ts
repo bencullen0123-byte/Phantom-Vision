@@ -70,6 +70,9 @@ export const ghostTargets = pgTable("ghost_targets", {
   declineType: text("decline_type"),
   // Stripe Customer ID for customer portal redirects
   stripeCustomerId: text("stripe_customer_id"),
+  // Failure Capture Expansion: detailed Stripe failure info from Payment Intent
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -97,6 +100,8 @@ export interface InsertGhostTarget {
   failureReason?: string | null;
   declineType?: string | null;
   stripeCustomerId?: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -118,6 +123,8 @@ export interface GhostTarget {
   failureReason: string | null;
   declineType: string | null;
   stripeCustomerId: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
 }
 
 // Raw database type (encrypted fields)

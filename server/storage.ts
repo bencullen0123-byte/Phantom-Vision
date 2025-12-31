@@ -84,6 +84,8 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     failureReason: dbRecord.failureReason,
     declineType: dbRecord.declineType,
     stripeCustomerId: dbRecord.stripeCustomerId,
+    failureCode: dbRecord.failureCode,
+    failureMessage: dbRecord.failureMessage,
   };
 }
 
@@ -108,6 +110,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   failureReason?: string | null;
   declineType?: string | null;
   stripeCustomerId?: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -130,6 +134,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     failureReason: target.failureReason,
     declineType: target.declineType,
     stripeCustomerId: target.stripeCustomerId,
+    failureCode: target.failureCode,
+    failureMessage: target.failureMessage,
   };
 }
 
@@ -386,6 +392,10 @@ export class DatabaseStorage implements IStorage {
           customerNameTag: encryptedPayload.customerNameTag,
           amount: encryptedPayload.amount,
           purgeAt: encryptedPayload.purgeAt,
+          failureReason: encryptedPayload.failureReason,
+          declineType: encryptedPayload.declineType,
+          failureCode: encryptedPayload.failureCode,
+          failureMessage: encryptedPayload.failureMessage,
         },
       })
       .returning();

@@ -65,12 +65,19 @@ function categorizeDeclineCode(code: string | null | undefined): { declineType: 
   return { declineType: 'soft', failureReason: code };
 }
 
+interface FailureDetails {
+  failureCode: string | null;
+  failureMessage: string | null;
+}
+
 interface GhostResult {
   email: string;
   customerName: string;
   amount: number;
   invoiceId: string;
   customerId: string;
+  failureCode?: string | null;
+  failureMessage?: string | null;
 }
 
 interface ScanResult {
@@ -138,6 +145,36 @@ function createMerchantStripeClient(accessToken: string): Stripe {
   return new Stripe(accessToken, {
     apiVersion: "2025-12-15.clover",
   });
+}
+
+// Extract failure details from Payment Intent's last_payment_error
+async function extractFailureFromPaymentIntent(
+  stripe: Stripe,
+  paymentIntentId: string | null
+): Promise<FailureDetails> {
+  if (!paymentIntentId) {
+    return { failureCode: null, failureMessage: null };
+  }
+
+  try {
+    const paymentIntent = await withRetry(() =>
+      stripe.paymentIntents.retrieve(paymentIntentId)
+    );
+
+    const lastError = paymentIntent.last_payment_error;
+    if (!lastError) {
+      return { failureCode: null, failureMessage: null };
+    }
+
+    // Extract code: prefer decline_code, fallback to code
+    const failureCode = lastError.decline_code || lastError.code || null;
+    const failureMessage = lastError.message || null;
+
+    return { failureCode, failureMessage };
+  } catch (error: any) {
+    console.log(`[GHOST HUNTER] Could not fetch PaymentIntent ${paymentIntentId}: ${error.message}`);
+    return { failureCode: null, failureMessage: null };
+  }
 }
 
 async function getDecryptedToken(merchant: Merchant): Promise<string> {
@@ -505,6 +542,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
               const declineCode = lastPaymentError?.decline_code || null;
               const { declineType, failureReason } = categorizeDeclineCode(declineCode);
 
+              // Failure Capture Expansion: Extract detailed failure info from Payment Intent
+              const invoiceAny = invoice as any;
+              const paymentIntentId = typeof invoiceAny.payment_intent === 'string' 
+                ? invoiceAny.payment_intent 
+                : invoiceAny.payment_intent?.id || null;
+              const { failureCode, failureMessage } = await extractFailureFromPaymentIntent(stripe, paymentIntentId);
+
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
@@ -520,6 +564,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 status: "pending",
                 failureReason,
                 declineType,
+                failureCode,
+                failureMessage,
               });
               const upsertMs = Date.now() - upsertStart;
               telemetry.totalUpsertMs += upsertMs;
@@ -531,6 +577,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 amount,
                 invoiceId: invoice.id,
                 customerId,
+                failureCode,
+                failureMessage,
               });
 
               result.totalRevenueAtRisk += amount;
@@ -544,7 +592,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 remainingCapacity--;
               }
 
-              console.log(`[GHOST HUNTER] Ghost upserted: ${email}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
+              // Log ghost with failure reason
+              const reasonLog = failureCode ? ` - Reason: ${failureCode}` : '';
+              console.log(`[GHOST HUNTER] Found Ghost: ${email}${reasonLog}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
             } else {
               telemetry.subscriptionFailed++;
               console.log('[FORENSIC] Invoice ' + invoice.id + ' failed subscription check for customer ' + customerId);
