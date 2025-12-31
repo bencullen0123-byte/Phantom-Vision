@@ -6,6 +6,7 @@ import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
+import { runSeeder } from "./services/seeder";
 import { requireMerchant } from "./middleware/auth";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
@@ -738,6 +739,30 @@ export async function registerRoutes(
       console.error("[DEV] Test merchant onboarding failed:", error.message);
       return res.status(500).json({
         error: "Onboarding failed",
+        details: error.message
+      });
+    }
+  });
+
+  // ============================================================
+  // DEV-ONLY: Scenario Seeder
+  // ============================================================
+  app.post("/api/dev/seed-scenarios", async (req: Request, res: Response) => {
+    // Safety check: Only allow in development
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ 
+        error: "This endpoint is not available in production" 
+      });
+    }
+
+    try {
+      console.log("[DEV] Scenario seeder triggered via API");
+      const result = await runSeeder();
+      return res.json(result);
+    } catch (error: any) {
+      console.error("[DEV] Scenario seeder failed:", error.message);
+      return res.status(500).json({
+        error: "Seeder failed",
         details: error.message
       });
     }
