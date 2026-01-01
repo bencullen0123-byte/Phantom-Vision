@@ -2,13 +2,15 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText, RefreshCw, Zap, Clock } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import MoneyHero from "@/components/MoneyHero";
 import ForensicCharts from "@/components/ForensicCharts";
 import LeakageDonut from "@/components/charts/LeakageDonut";
+import { useState, useEffect } from "react";
 
 interface DiagnosticPulse {
   totalInvoicesScanned: number;
@@ -250,6 +252,205 @@ function RevenueSavedCard({ amount, currency }: { amount: number; currency: stri
   );
 }
 
+function CommandHeader() {
+  const { merchant, refetch } = useMerchant();
+  const { stats, refetch: refetchStats } = useMerchantStats();
+  const { toast } = useToast();
+  
+  const [isArmed, setIsArmed] = useState(false);
+  
+  useEffect(() => {
+    if (merchant) {
+      setIsArmed(merchant.autoPilotEnabled || false);
+    }
+  }, [merchant]);
+
+  const formatEuro = (cents: number) => {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(cents / 100);
+  };
+
+  const formatRelativeTime = (dateString: string | null) => {
+    if (!dateString) return "Never";
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  };
+
+  const toggleMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await apiRequest("PATCH", "/api/merchant/branding", {
+        autoPilotEnabled: enabled,
+      });
+      return res.json();
+    },
+    onSuccess: (_, enabled) => {
+      toast({
+        title: enabled ? "Sentinel Armed" : "Sentinel Disarmed",
+        description: enabled 
+          ? "Auto-Pilot is now active."
+          : "Auto-Pilot disabled.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      setIsArmed(!isArmed);
+      toast({
+        title: "Failed to update",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const auditMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
+      return { data: await res.json(), status: res.status };
+    },
+    onSuccess: ({ data, status }) => {
+      if (status === 202) {
+        toast({
+          title: "Audit Initiated",
+          description: "Scanning in background...",
+        });
+      } else {
+        toast({
+          title: "Audit Complete",
+          description: `Found ${data.total_ghosts_found} ghosts.`,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      refetchStats();
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Audit Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleToggle = (enabled: boolean) => {
+    if (!merchant?.supportEmail?.trim() && enabled) {
+      toast({
+        title: "Security Lock",
+        description: "Add a support email in Settings first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsArmed(enabled);
+    toggleMutation.mutate(enabled);
+  };
+
+  const volumeGuarded = stats?.grossInvoicedCents || 0;
+  const revenueSaved = (stats?.lifetime?.totalRecoveredCents || 0) + (stats?.totalProtectedCents || 0);
+  const lastAudit = stats?.lastAuditAt;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 py-4 px-6 border-b border-white/10 bg-slate-900/50 -mx-6 -mt-6 mb-6">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+          <Shield className="w-5 h-5 text-indigo-400" />
+        </div>
+        <div>
+          <p 
+            className="text-xl font-bold text-white"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-volume-guarded"
+          >
+            {formatEuro(volumeGuarded)}
+          </p>
+          <p className="text-xs text-slate-500">Volume Guarded</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border-2 transition-all ${
+          isArmed 
+            ? "bg-emerald-500/10 border-emerald-500/30 animate-sentinel-armed" 
+            : "bg-slate-800/50 border-white/10"
+        }`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            isArmed ? "bg-emerald-500/30" : "bg-slate-700"
+          }`}>
+            <Zap className={`w-4 h-4 ${isArmed ? "text-emerald-400" : "text-slate-400"}`} />
+          </div>
+          <div className="hidden sm:block">
+            <p className={`text-sm font-semibold ${isArmed ? "text-emerald-400" : "text-slate-300"}`}>
+              {isArmed ? "ARMED" : "Standby"}
+            </p>
+          </div>
+          <Switch
+            checked={isArmed}
+            onCheckedChange={handleToggle}
+            disabled={toggleMutation.isPending}
+            className={isArmed ? "data-[state=checked]:bg-emerald-600" : ""}
+            data-testid="switch-command-autopilot"
+          />
+        </div>
+        
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-white/10 text-slate-300"
+          onClick={() => auditMutation.mutate()}
+          disabled={auditMutation.isPending}
+          data-testid="button-refresh-audit"
+        >
+          {auditMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <RefreshCw className="w-4 h-4" />
+          )}
+          <span className="hidden sm:inline ml-2">Refresh</span>
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-6">
+        <div className="text-right">
+          <p 
+            className="text-xl font-bold text-emerald-400"
+            style={{ 
+              fontFamily: "JetBrains Mono, monospace",
+              textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
+            }}
+            data-testid="text-command-revenue-saved"
+          >
+            {formatEuro(revenueSaved)}
+          </p>
+          <p className="text-xs text-emerald-500/70">Revenue Saved</p>
+        </div>
+        
+        <div className="text-right">
+          <div className="flex items-center gap-1 text-slate-400">
+            <Clock className="w-4 h-4" />
+            <p className="text-sm font-medium" data-testid="text-last-audit">
+              {formatRelativeTime(lastAudit || null)}
+            </p>
+          </div>
+          <p className="text-xs text-slate-500">Last Audit</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardMetrics() {
   const { stats, isLoading } = useMerchantStats();
   
@@ -264,6 +465,8 @@ function DashboardMetrics() {
 
   return (
     <div className="space-y-8">
+      <CommandHeader />
+      
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-1">
           <RevenueSavedCard 
