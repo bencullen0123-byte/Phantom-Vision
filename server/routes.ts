@@ -302,12 +302,15 @@ export async function registerRoutes(
         console.error("[AUDIT] Errors during scan:", result.errors);
       }
 
+      // Pure Ledger: Return live stats from database instead of scan result
+      const liveStats = await storage.getHistoricalRevenueStats(merchant.id);
+
       return res.json({
         status: "success",
         merchant_id: merchant.stripeUserId,
-        total_ghosts_found: result.total_ghosts_found,
-        total_revenue_at_risk: result.total_revenue_at_risk,
-        total_revenue_at_risk_formatted: `$${(result.total_revenue_at_risk / 100).toFixed(2)}`,
+        total_ghosts_found: liveStats.lifetime.totalGhostCount,
+        total_revenue_at_risk: liveStats.lifetime.allTimeLeakedCents - liveStats.lifetime.totalRecoveredCents,
+        total_revenue_at_risk_formatted: `$${((liveStats.lifetime.allTimeLeakedCents - liveStats.lifetime.totalRecoveredCents) / 100).toFixed(2)}`,
         oracle_data_points: result.oracle_data_points,
         errors: result.errors
       });
