@@ -43,10 +43,19 @@ Preferred communication style: Simple, everyday language.
 - **Database:** PostgreSQL via Drizzle ORM
 - **Schema Location:** `shared/schema.ts`
 - **Tables:**
-  - `merchants` - Encrypted Stripe access tokens with IV, auth tag, totalRecoveredCents, and multi-currency support (defaultCurrency, impendingLeakageCents, totalProtectedCents)
+  - `merchants` - Encrypted Stripe access tokens with IV, auth tag, totalRecoveredCents, and multi-currency support (defaultCurrency, impendingLeakageCents, totalProtectedCents, grossInvoicedCents, lastAuditAt)
   - `ghost_targets` - Transient PII (email, amount), status (pending/impending/recovered/exhausted), 90-day purge timestamp, unique invoiceId, stripeCustomerId for portal redirects
   - `liquidity_oracle` - Anonymized metadata (business category, timing data)
   - `system_logs` - Heartbeat job monitoring (job name, status, details, error messages)
+
+### Universal Revenue Intelligence (ML Metadata)
+- **Non-PII Fields** (queryable for cross-merchant learning):
+  - `cardBrand` - Card network (Visa, Mastercard, Amex, etc.)
+  - `cardFunding` - Card type (credit, debit, prepaid)
+  - `countryCode` - Customer/issuer ISO country code
+  - `requires3ds` - Whether 3D Secure was required (technical vs financial failure)
+  - `stripeErrorCode` - Raw Stripe decline/error code for ML features
+  - `originalInvoiceDate` - Temporal anchor for recovery velocity analysis
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
