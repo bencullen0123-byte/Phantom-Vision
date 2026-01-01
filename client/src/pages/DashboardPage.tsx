@@ -2,16 +2,12 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText, RefreshCw, Zap, Clock } from "lucide-react";
+import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText, RefreshCw, Clock } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import MoneyHero from "@/components/MoneyHero";
 import ForensicCharts from "@/components/ForensicCharts";
-import LeakageDonut from "@/components/charts/LeakageDonut";
 import DiagnosticTrident from "@/components/DiagnosticTrident";
-import { useState, useEffect } from "react";
 
 interface DiagnosticPulse {
   totalInvoicesScanned: number;
@@ -262,17 +258,9 @@ function RevenueSavedCard({ amount, currency }: { amount: number; currency: stri
 }
 
 function CommandHeader() {
-  const { merchant, refetch } = useMerchant();
+  const { merchant } = useMerchant();
   const { stats, refetch: refetchStats } = useMerchantStats();
   const { toast } = useToast();
-  
-  const [isArmed, setIsArmed] = useState(false);
-  
-  useEffect(() => {
-    if (merchant) {
-      setIsArmed(merchant.autoPilotEnabled || false);
-    }
-  }, [merchant]);
 
   const formatEuro = (cents: number) => {
     return new Intl.NumberFormat("en-IE", {
@@ -297,33 +285,6 @@ function CommandHeader() {
     return `${diffDays}d ago`;
   };
 
-  const toggleMutation = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      const res = await apiRequest("PATCH", "/api/merchant/branding", {
-        autoPilotEnabled: enabled,
-      });
-      return res.json();
-    },
-    onSuccess: (_, enabled) => {
-      toast({
-        title: enabled ? "Sentinel Armed" : "Sentinel Disarmed",
-        description: enabled 
-          ? "Auto-Pilot is now active."
-          : "Auto-Pilot disabled.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
-      refetch();
-    },
-    onError: (error: Error) => {
-      setIsArmed(!isArmed);
-      toast({
-        title: "Failed to update",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
   const auditMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
@@ -343,7 +304,6 @@ function CommandHeader() {
       }
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
       refetchStats();
-      refetch();
     },
     onError: (error: Error) => {
       toast({
@@ -354,32 +314,21 @@ function CommandHeader() {
     },
   });
 
-  const handleToggle = (enabled: boolean) => {
-    if (!merchant?.supportEmail?.trim() && enabled) {
-      toast({
-        title: "Security Lock",
-        description: "Add a support email in Settings first.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setIsArmed(enabled);
-    toggleMutation.mutate(enabled);
-  };
-
+  const isArmed = merchant?.autoPilotEnabled || false;
   const volumeGuarded = stats?.grossInvoicedCents || 0;
+  const activeLeakage = stats?.lifetime?.allTimeLeakedCents || 0;
   const revenueSaved = (stats?.lifetime?.totalRecoveredCents || 0) + (stats?.totalProtectedCents || 0);
   const lastAudit = stats?.lastAuditAt;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 py-4 px-6 border-b border-white/10 bg-slate-900/50 -mx-6 -mt-6 mb-6">
+    <div className="flex flex-wrap items-center justify-between gap-8 py-3 px-6 border-b border-white/10 bg-slate-900/50 -mx-6 -mt-6 mb-6">
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
-          <Shield className="w-5 h-5 text-indigo-400" />
+        <div className="w-9 h-9 rounded-full bg-indigo-500/20 flex items-center justify-center">
+          <Shield className="w-4 h-4 text-indigo-400" />
         </div>
         <div>
           <p 
-            className="text-xl font-bold text-white"
+            className="text-lg font-bold text-white tabular-nums"
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-volume-guarded"
           >
@@ -389,29 +338,23 @@ function CommandHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border-2 transition-all ${
-          isArmed 
-            ? "bg-emerald-500/10 border-emerald-500/30 animate-sentinel-armed" 
-            : "bg-slate-800/50 border-white/10"
-        }`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            isArmed ? "bg-emerald-500/30" : "bg-slate-700"
-          }`}>
-            <Zap className={`w-4 h-4 ${isArmed ? "text-emerald-400" : "text-slate-400"}`} />
-          </div>
-          <div className="hidden sm:block">
-            <p className={`text-sm font-semibold ${isArmed ? "text-emerald-400" : "text-slate-300"}`}>
-              {isArmed ? "ARMED" : "Standby"}
-            </p>
-          </div>
-          <Switch
-            checked={isArmed}
-            onCheckedChange={handleToggle}
-            disabled={toggleMutation.isPending}
-            className={isArmed ? "data-[state=checked]:bg-emerald-600" : ""}
-            data-testid="switch-command-autopilot"
-          />
+      <div className="flex items-center gap-8">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isArmed ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+          <span className={`text-sm font-medium ${isArmed ? "text-emerald-400" : "text-slate-400"}`} data-testid="text-sentinel-status">
+            {isArmed ? "Sentinel Active" : "Sentinel Standby"}
+          </span>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <span 
+            className="text-sm font-bold text-red-400/80 tabular-nums"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-active-leakage"
+          >
+            {formatEuro(activeLeakage)}
+          </span>
+          <span className="text-xs text-slate-500">Active Leakage</span>
         </div>
         
         <Button
@@ -431,10 +374,10 @@ function CommandHeader() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-8">
         <div className="text-right">
           <p 
-            className="text-xl font-bold text-emerald-400"
+            className="text-lg font-bold text-emerald-400 tabular-nums"
             style={{ 
               fontFamily: "JetBrains Mono, monospace",
               textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
@@ -448,8 +391,8 @@ function CommandHeader() {
         
         <div className="text-right">
           <div className="flex items-center gap-1 text-slate-400">
-            <Clock className="w-4 h-4" />
-            <p className="text-sm font-medium" data-testid="text-last-audit">
+            <Clock className="w-3 h-3" />
+            <p className="text-sm font-medium tabular-nums" data-testid="text-last-audit">
               {formatRelativeTime(lastAudit || null)}
             </p>
           </div>
