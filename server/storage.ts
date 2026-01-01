@@ -283,8 +283,13 @@ export class DatabaseStorage implements IStorage {
     const activeGhosts = await this.countActiveGhostsByMerchant(merchantId);
     const recoveredCount = await this.countRecoveredGhostsByMerchant(merchantId);
     
-    const merchant = await this.getMerchant(merchantId);
-    const totalRecoveredCents = merchant?.totalRecoveredCents || 0;
+    // Live aggregate: sum recovered amounts from ghost_targets
+    const recoveredResult = await db.execute(sql`
+      SELECT COALESCE(SUM(amount), 0)::bigint AS total
+      FROM ghost_targets
+      WHERE merchant_id = ${merchantId} AND status = 'recovered'
+    `);
+    const totalRecoveredCents = Number((recoveredResult.rows[0] as any)?.total || 0);
     
     const recoveryRate = totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0;
     
@@ -393,15 +398,30 @@ export class DatabaseStorage implements IStorage {
     const monthlyTrend = await this.getMonthlyTrend(merchantId);
     const dailyPulse = await this.getDailyPulse(merchantId);
     
+    // Live aggregate from ghost_targets instead of stale merchant columns
+    const aggregateResult = await db.execute(sql`
+      SELECT
+        COUNT(*)::bigint AS total_count,
+        COALESCE(SUM(CASE WHEN status IN ('pending', 'impending') THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
+        COALESCE(SUM(amount), 0)::bigint AS all_time_leaked,
+        COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered,
+        COALESCE(SUM(CASE WHEN status = 'impending' THEN amount ELSE 0 END), 0)::bigint AS impending_leakage,
+        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected
+      FROM ghost_targets
+      WHERE merchant_id = ${merchantId}
+    `);
+    
+    const row = aggregateResult.rows[0] as any;
+    
     return {
       lifetime: {
-        allTimeLeakedCents: Number(merchant?.allTimeLeakedCents || 0),
-        totalGhostCount: merchant?.totalGhostCount || 0,
-        totalRecoveredCents: Number(merchant?.totalRecoveredCents || 0),
+        allTimeLeakedCents: Number(row?.all_time_leaked || 0),
+        totalGhostCount: Number(row?.total_count || 0),
+        totalRecoveredCents: Number(row?.total_recovered || 0),
       },
       defaultCurrency: merchant?.defaultCurrency || 'gbp',
-      impendingLeakageCents: Number(merchant?.impendingLeakageCents || 0),
-      totalProtectedCents: Number(merchant?.totalProtectedCents || 0),
+      impendingLeakageCents: Number(row?.impending_leakage || 0),
+      totalProtectedCents: Number(row?.total_protected || 0),
       monthlyTrend,
       dailyPulse,
     };
