@@ -451,11 +451,6 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   let totalInvoicesScanned = 0;
   let batchNumber = 0;
   
-  // Shadow Revenue Calculator: running tallies
-  let shadowRevenueTally = 0;
-  let ghostCountTally = 0;
-  let scanCompletedSuccessfully = false;
-  
   // Overflow Rule: Track if we hit tier limit mid-scan
   let tierLimitReached = false;
   
@@ -583,10 +578,6 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
 
               result.totalRevenueAtRisk += amount;
               
-              // Shadow Revenue Calculator: increment running tallies
-              shadowRevenueTally += amount;
-              ghostCountTally++;
-              
               // Decrement remaining capacity only for newly ingested ghosts
               if (isNewGhost) {
                 remainingCapacity--;
@@ -646,7 +637,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   }
 
   // Check if scan completed without breaking due to errors
-  scanCompletedSuccessfully = result.errors.length === 0;
+  const scanCompletedSuccessfully = result.errors.length === 0;
 
   // PROACTIVE EXPIRY DETECTION: Scan for subscriptions with expiring cards
   if (scanCompletedSuccessfully) {
@@ -688,23 +679,18 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     }
   }
 
-  // Shadow Revenue Calculator: Atomic persistence on successful scan completion
+  // Update lastAuditAt and defaultCurrency (live totals calculated from ghost_targets)
   if (scanCompletedSuccessfully) {
     try {
-      await storage.updateMerchantShadowRevenue(merchantId, {
-        allTimeLeakedCents: shadowRevenueTally,
-        totalGhostCount: ghostCountTally,
+      await storage.updateMerchant(merchantId, {
         lastAuditAt: new Date(),
         defaultCurrency: detectedCurrency,
       });
-      const currencySymbol = detectedCurrency?.toUpperCase() || 'GBP';
-      console.log(`[GHOST HUNTER] Shadow Revenue updated: ${currencySymbol} ${(shadowRevenueTally / 100).toFixed(2)} across ${ghostCountTally} ghosts`);
+      console.log(`[GHOST HUNTER] Audit timestamp updated, currency: ${detectedCurrency?.toUpperCase() || 'GBP'}`);
     } catch (error: any) {
-      result.errors.push(`Failed to persist Shadow Revenue: ${error.message}`);
-      console.error(`[GHOST HUNTER] Shadow Revenue persistence error:`, error);
+      result.errors.push(`Failed to update merchant: ${error.message}`);
+      console.error(`[GHOST HUNTER] Merchant update error:`, error);
     }
-  } else {
-    console.log(`[GHOST HUNTER] Skipping Shadow Revenue update due to scan errors`);
   }
 
   // DIAGNOSTIC SHELL: Final telemetry summary
@@ -728,7 +714,6 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   console.log(`[GHOST HUNTER] Total batches processed: ${batchNumber}`);
   console.log(`[GHOST HUNTER] Ghosts found: ${result.ghostsFound.length}`);
   console.log(`[GHOST HUNTER] Revenue at risk: $${(result.totalRevenueAtRisk / 100).toFixed(2)}`);
-  console.log(`[GHOST HUNTER] Shadow Revenue (all-time): $${(shadowRevenueTally / 100).toFixed(2)}`);
   console.log(`[GHOST HUNTER] Impending risks: ${telemetry.impendingCount} cards expiring, $${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk`);
   console.log(`[GHOST HUNTER] Oracle data points: ${result.oracleDataPoints}`);
   console.log(`[GHOST HUNTER] ═══════════════════════════════════════════════════`);
