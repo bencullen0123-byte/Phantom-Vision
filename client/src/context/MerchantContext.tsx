@@ -31,6 +31,10 @@ interface MerchantStats {
   supportEmail: string | null;
   brandColor: string | null;
   autoPilotEnabled: boolean;
+  defaultCurrency: string | null;
+  grossInvoicedCents: number;
+  impendingLeakageCents: number;
+  totalProtectedCents: number;
 }
 
 interface AuthStatus {
