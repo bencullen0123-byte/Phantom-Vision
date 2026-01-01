@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Search, Ghost, ArrowUpDown, Copy, Check } from "lucide-react";
+import { Search, Ghost, ArrowUpDown, Copy, Check } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
   CardDNABadge,
   CountryBadge,
   ErrorCodeBadge,
+  EngagementBadge,
 } from "@/components/ui/forensic-badges";
 import { useToast } from "@/hooks/use-toast";
 
@@ -79,26 +80,6 @@ function formatRelativeTime(dateStr: string | null): string {
   });
 }
 
-function formatShortDate(dateStr: string | null): string {
-  if (!dateStr) return "";
-  return new Date(dateStr).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
-}
-
-function getLastAction(ghost: GhostTarget): { label: string; date: string; color: string } {
-  if (ghost.status === "recovered" && ghost.recoveredAt) {
-    return { label: "Recovered", date: formatShortDate(ghost.recoveredAt), color: "text-emerald-400" };
-  }
-  if (ghost.lastClickedAt) {
-    return { label: "Clicked", date: formatShortDate(ghost.lastClickedAt), color: "text-amber-400" };
-  }
-  if (ghost.lastEmailedAt) {
-    return { label: "Emailed", date: formatShortDate(ghost.lastEmailedAt), color: "text-blue-400" };
-  }
-  return { label: "Discovered", date: formatShortDate(ghost.discoveredAt), color: "text-slate-500" };
-}
 
 function CopyEmailButton({ email }: { email: string }) {
   const [copied, setCopied] = useState(false);
@@ -245,66 +226,73 @@ function GhostLedger() {
                 </Button>
               </TableHead>
               <TableHead className="text-slate-400">Status</TableHead>
+              <TableHead className="text-slate-400">Engagement</TableHead>
               <TableHead className="text-slate-400">Strategy</TableHead>
-              <TableHead className="text-slate-400">Last Action</TableHead>
               <TableHead className="text-slate-400">Attribution</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredGhosts.map((ghost) => (
-              <TableRow 
-                key={ghost.id} 
-                className="border-white/5 hover:bg-white/[0.02]"
-                data-testid={`row-ghost-${ghost.id}`}
-              >
-                <TableCell>
-                  <div className="flex flex-col">
-                    <span className="text-slate-200 text-sm">{ghost.customerName}</span>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="text-slate-500 text-xs truncate max-w-[180px]">{ghost.email}</span>
-                      <CopyEmailButton email={ghost.email} />
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell 
-                  className={ghost.status === "recovered" ? "text-emerald-500" : "text-slate-300"}
-                  style={{ fontFamily: "JetBrains Mono, monospace" }}
+            {filteredGhosts.map((ghost) => {
+              const isHighPriority = ghost.clickCount > 0 && ghost.status !== "recovered";
+              return (
+                <TableRow 
+                  key={ghost.id} 
+                  className={`border-white/5 hover:bg-white/[0.02] ${isHighPriority ? "bg-emerald-500/5" : ""}`}
+                  data-testid={`row-ghost-${ghost.id}`}
                 >
-                  {formatCurrency(ghost.amount, currency)}
-                </TableCell>
-                <TableCell>
-                  <CardDNABadge brand={ghost.cardBrand} funding={ghost.cardFunding} />
-                </TableCell>
-                <TableCell>
-                  <CountryBadge countryCode={ghost.countryCode} />
-                </TableCell>
-                <TableCell>
-                  <ErrorCodeBadge code={ghost.stripeErrorCode} />
-                </TableCell>
-                <TableCell className="text-slate-400 text-sm" style={{ fontFamily: "JetBrains Mono, monospace" }}>
-                  {formatRelativeTime(ghost.discoveredAt)}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={ghost.status as "pending" | "nudged" | "recovered" | "protected" | "exhausted"} emailCount={ghost.emailCount} />
-                </TableCell>
-                <TableCell>
-                  <StrategyBadge strategy={ghost.recoveryStrategy as "technical_bridge" | "smart_retry" | "card_refresh" | "high_value_manual" | null} />
-                </TableCell>
-                <TableCell className="text-sm">
-                  {(() => {
-                    const action = getLastAction(ghost);
-                    return (
-                      <span className={action.color}>
-                        {action.label} {action.date && <span className="text-slate-600">{action.date}</span>}
-                      </span>
-                    );
-                  })()}
-                </TableCell>
-                <TableCell>
-                  <AttributionBadge type={ghost.recoveryType as "organic" | "pulse" | "phantom" | null} />
-                </TableCell>
-              </TableRow>
-            ))}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-200 text-sm">{ghost.customerName}</span>
+                        {isHighPriority && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                            HOT
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-slate-500 text-xs truncate max-w-[180px]">{ghost.email}</span>
+                        <CopyEmailButton email={ghost.email} />
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell 
+                    className={ghost.status === "recovered" ? "text-emerald-500" : "text-slate-300"}
+                    style={{ fontFamily: "JetBrains Mono, monospace" }}
+                  >
+                    {formatCurrency(ghost.amount, currency)}
+                  </TableCell>
+                  <TableCell>
+                    <CardDNABadge brand={ghost.cardBrand} funding={ghost.cardFunding} />
+                  </TableCell>
+                  <TableCell>
+                    <CountryBadge countryCode={ghost.countryCode} />
+                  </TableCell>
+                  <TableCell>
+                    <ErrorCodeBadge code={ghost.stripeErrorCode} />
+                  </TableCell>
+                  <TableCell className="text-slate-400 text-sm" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                    {formatRelativeTime(ghost.discoveredAt)}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={ghost.status as "pending" | "nudged" | "recovered" | "protected" | "exhausted"} emailCount={ghost.emailCount} />
+                  </TableCell>
+                  <TableCell>
+                    <EngagementBadge 
+                      nudgeCount={ghost.emailCount} 
+                      clickCount={ghost.clickCount} 
+                      lastClickedAt={ghost.lastClickedAt} 
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <StrategyBadge strategy={ghost.recoveryStrategy as "technical_bridge" | "smart_retry" | "card_refresh" | "high_value_manual" | null} />
+                  </TableCell>
+                  <TableCell>
+                    <AttributionBadge type={ghost.recoveryType as "organic" | "pulse" | "phantom" | null} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

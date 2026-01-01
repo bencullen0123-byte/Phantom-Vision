@@ -312,6 +312,74 @@ export function ErrorCodeBadge({ code }: { code: string | null }) {
   );
 }
 
+interface EngagementData {
+  nudgeCount: number;
+  clickCount: number;
+  lastClickedAt: string | null;
+}
+
+function formatEngagementTime(dateStr: string | null): string {
+  if (!dateStr) return "";
+  
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffMins < 60) {
+    return `Active ${diffMins}m ago`;
+  }
+  if (diffHours < 24) {
+    return `Active ${diffHours}h ago`;
+  }
+  if (diffDays < 7) {
+    return `Active ${diffDays}d ago`;
+  }
+  
+  return `Active ${diffDays}d ago`;
+}
+
+export function EngagementBadge({ nudgeCount, clickCount, lastClickedAt }: EngagementData) {
+  const isEngaged = clickCount > 0;
+  
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        {isEngaged ? (
+          <Badge 
+            variant="outline" 
+            className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-xs animate-heartbeat"
+          >
+            <Zap className="w-3 h-3 mr-1" />
+            Engaged
+          </Badge>
+        ) : nudgeCount > 0 ? (
+          <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs">
+            <RefreshCw className="w-3 h-3 mr-1" />
+            Nudged
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="bg-slate-500/10 text-slate-500 border-slate-500/20 text-xs">
+            Awaiting
+          </Badge>
+        )}
+      </div>
+      <span className="text-xs text-slate-500">
+        {nudgeCount > 0 && `${nudgeCount} Nudge${nudgeCount > 1 ? "s" : ""}`}
+        {nudgeCount > 0 && clickCount > 0 && " • "}
+        {clickCount > 0 && `${clickCount} Click${clickCount > 1 ? "s" : ""}`}
+      </span>
+      {lastClickedAt && (
+        <span className="text-xs text-emerald-400/70">
+          {formatEngagementTime(lastClickedAt)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 type AttributionType = "organic" | "pulse" | "phantom" | null;
 
 export function AttributionBadge({ type }: { type: AttributionType }) {
