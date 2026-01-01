@@ -1,7 +1,7 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Search, Shield, TrendingDown, TrendingUp, Zap } from "lucide-react";
+import { Loader2, RefreshCw, Search, Shield, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -117,6 +117,59 @@ function DeepHarvestGate() {
   );
 }
 
+function RefreshAuditButton() {
+  const { refetch } = useMerchant();
+  const { toast } = useToast();
+
+  const auditMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Audit Complete",
+        description: `Found ${data.total_ghosts_found || 0} new issues identified.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ghosts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/system/logs"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Audit Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => auditMutation.mutate()}
+      disabled={auditMutation.isPending}
+      className="border-white/10 text-slate-300"
+      data-testid="button-refresh-audit"
+    >
+      {auditMutation.isPending ? (
+        <>
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          Hunting Ghosts...
+        </>
+      ) : (
+        <>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Refresh Audit
+        </>
+      )}
+    </Button>
+  );
+}
+
 function AutoPilotToggle() {
   const { merchant, refetch } = useMerchant();
   const { toast } = useToast();
@@ -203,7 +256,10 @@ function MoneyHero() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-semibold text-white">Revenue Intelligence</h1>
-        <AutoPilotToggle />
+        <div className="flex items-center gap-3">
+          <RefreshAuditButton />
+          <AutoPilotToggle />
+        </div>
       </div>
       <p className="text-slate-500 text-sm -mt-4">
         Last audit: <span className="font-mono text-slate-400">{formatDate(merchant.lastAuditAt)}</span>
