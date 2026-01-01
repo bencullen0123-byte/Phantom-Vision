@@ -2,13 +2,21 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
+import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import MoneyHero from "@/components/MoneyHero";
 import ForensicCharts from "@/components/ForensicCharts";
 import LeakageDonut from "@/components/charts/LeakageDonut";
+
+interface DiagnosticPulse {
+  totalInvoicesScanned: number;
+  requires3dsCount: number;
+  cardBrandDistribution: Record<string, number>;
+  lastScanAt: string | null;
+  lastScanStatus: string | null;
+}
 
 function ConnectStripeGate() {
   return (
@@ -132,11 +140,19 @@ function DeepHarvestGate() {
   );
 }
 
-function ConversionFunnel({ funnel, recoveryRate }: { 
+function ConversionFunnel({ funnel, recoveryRate, auditedCount }: { 
   funnel?: { totalGhosts: number; nudgedCount: number; clickedCount: number; recoveredCount: number };
   recoveryRate?: number;
+  auditedCount?: number;
 }) {
   const steps = [
+    { 
+      label: "Audited", 
+      value: auditedCount || 0, 
+      icon: FileText, 
+      color: "text-indigo-400",
+      bg: "bg-indigo-500/20"
+    },
     { 
       label: "Ghosts Detected", 
       value: funnel?.totalGhosts || 0, 
@@ -237,6 +253,11 @@ function RevenueSavedCard({ amount, currency }: { amount: number; currency: stri
 function DashboardMetrics() {
   const { stats, isLoading } = useMerchantStats();
   
+  // Fetch diagnostic pulse for "Audited" count
+  const { data: diagnosticPulse } = useQuery<DiagnosticPulse>({
+    queryKey: ["/api/diagnostic-pulse"],
+  });
+  
   const totalRecoveredCents = stats?.lifetime?.totalRecoveredCents || 0;
   const totalProtectedCents = stats?.totalProtectedCents || 0;
   const revenueSaved = totalRecoveredCents + totalProtectedCents;
@@ -261,6 +282,7 @@ function DashboardMetrics() {
       <ConversionFunnel 
         funnel={stats?.funnel} 
         recoveryRate={stats?.recoveryRate} 
+        auditedCount={diagnosticPulse?.totalInvoicesScanned}
       />
       
       <ForensicCharts />
