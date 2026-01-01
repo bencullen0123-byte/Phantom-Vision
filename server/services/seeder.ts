@@ -72,11 +72,10 @@ async function createGhostScenario(
   const customerName = `Ghost Customer ${index}`;
   console.log(`[SEEDER] Creating Ghost #${index}: ${email}`);
   
-  // Create customer with declined card token
+  // Create customer without source first
   const customer = await stripe.customers.create({
     email,
     name: customerName,
-    source: "tok_chargeDeclined",
     metadata: {
       phantom_test: "true",
       scenario: "ghost"
@@ -84,20 +83,29 @@ async function createGhostScenario(
   });
   console.log(`[SEEDER] Ghost customer created: ${customer.id}`);
   
-  // Create subscription - this will fail to charge and create invoice.payment_failed
+  // Attach the decline-triggering card token
   try {
-    await stripe.subscriptions.create({
+    await stripe.customers.createSource(customer.id, { source: "tok_chargeDeclined" });
+  } catch (err: any) {
+    console.log(`[SEEDER] Ghost #${index} card attach failed (expected): ${err.message}`);
+  }
+  
+  // Create subscription with allow_incomplete to let the invoice be created even with failed payment
+  let subscriptionId = "";
+  try {
+    const subscription = await stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: priceId }],
       metadata: {
         phantom_test: "true",
         scenario: "ghost"
       },
-      payment_behavior: "error_if_incomplete",
+      payment_behavior: "allow_incomplete",
     });
+    subscriptionId = subscription.id;
+    console.log(`[SEEDER] Ghost #${index} subscription created (may be incomplete): ${subscription.id}`);
   } catch (err: any) {
-    // Expected - the subscription creation will fail due to declined card
-    console.log(`[SEEDER] Ghost #${index} subscription failed (expected): ${err.message}`);
+    console.log(`[SEEDER] Ghost #${index} subscription failed: ${err.message}`);
   }
   
   // DIRECT INJECTION: Fetch the invoice created for this customer and inject into ledger
@@ -154,39 +162,25 @@ async function createRiskScenario(
   const expMonth = index % 2 === 0 ? 1 : 2;
   console.log(`[SEEDER] Creating Risk #${index}: ${email} (expires ${expMonth}/2026)`);
   
-  // Create customer with payment method
+  // Create customer with source token (uses customer.createSource which restricted keys can access)
   const customer = await stripe.customers.create({
     email,
     name: customerName,
+    source: "tok_visa",
     metadata: {
       phantom_test: "true",
-      scenario: "risk"
+      scenario: "risk",
+      simulated_exp_month: String(expMonth),
+      simulated_exp_year: "2026"
     }
-  });
-  
-  // Create payment method with expiring card
-  const paymentMethod = await stripe.paymentMethods.create({
-    type: "card",
-    card: {
-      token: "tok_visa",
-    },
-  });
-  
-  // Update the payment method's card details to expire in 2026
-  // Note: We can't directly set expiry on tok_visa, so we'll attach and use it
-  // The expiry tracking will be handled by Stripe's card.exp_month and card.exp_year
-  await stripe.paymentMethods.attach(paymentMethod.id, { customer: customer.id });
-  await stripe.customers.update(customer.id, {
-    invoice_settings: { default_payment_method: paymentMethod.id }
   });
   
   console.log(`[SEEDER] Risk customer created: ${customer.id}`);
   
-  // Create subscription
+  // Create subscription using the default source
   const subscription = await stripe.subscriptions.create({
     customer: customer.id,
     items: [{ price: priceId }],
-    default_payment_method: paymentMethod.id,
     metadata: {
       phantom_test: "true",
       scenario: "risk",
