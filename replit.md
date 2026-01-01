@@ -149,11 +149,21 @@ shared/          # Shared types and schema
 - **Final Summary:** Writes to system_logs with total records, duration, peak RSS, avg UPSERT latency
 
 ### Frontend Pages
-- **DashboardPage** (`/`) - Landing and connection status
+- **DashboardPage** (`/`) - Landing and connection status (container component)
 - **SystemPage** (`/system`) - Financial Command Center with CFO KPIs
 - **RecoveriesPage** (`/recoveries`) - Ghost target management
 - **GrowthPage** (`/growth`) - Analytics and trends
 - **SettingsPage** (`/settings`) - Merchant configuration
+
+### Modular Dashboard Components
+- **MoneyHero** (`client/src/components/MoneyHero.tsx`) - Hero section with revenue metrics, leakage rate health status, and Auto-Pilot toggle
+  - Consumes `stats.grossInvoicedCents` for health calculation
+  - Health Status: Green (<5%), Amber (5-10%), Critical Red (>10%)
+- **ForensicCharts** (`client/src/components/ForensicCharts.tsx`) - Chart wrapper for MonthlyTrendChart and DailyPulseChart
+  - Passes `stats.monthlyTrend` and `stats.dailyPulse` to Recharts components
+- **LeakageDonut** (`client/src/components/charts/LeakageDonut.tsx`) - Donut chart for leakage category distribution
+  - Accepts optional `data` prop for injected data, falls back to internal fetch
+  - DashboardPage passes `stats.leakageDistribution` directly
 
 ### Financial Command Center (SystemPage)
 - **CFO Headline KPIs:**
