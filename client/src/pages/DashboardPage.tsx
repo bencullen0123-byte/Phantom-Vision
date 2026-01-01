@@ -187,14 +187,22 @@ function ConversionFunnel({ funnel, recoveryRate, auditedCount }: {
   ];
 
   return (
-    <Card className="bg-slate-900/50 border-white/5 p-6">
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-        <h3 className="text-lg font-semibold text-white">Recovery Funnel</h3>
+    <Card className="bg-slate-900/50 border-white/5 p-4">
+      <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <div className="flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-emerald-400" />
-          <span className="text-sm text-slate-400">
-            Conversion: <span className="text-emerald-400 font-semibold">{(recoveryRate || 0).toFixed(1)}%</span>
+          <FileText className="w-4 h-4 text-indigo-400" />
+          <h3 className="text-sm font-medium text-slate-300">Audit Proof</h3>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-slate-500">
+            {auditedCount?.toLocaleString() || 0} Invoices Audited
           </span>
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <span className="text-sm text-slate-400">
+              Conversion: <span className="text-emerald-400 font-semibold">{(recoveryRate || 0).toFixed(1)}%</span>
+            </span>
+          </div>
         </div>
       </div>
       
@@ -202,16 +210,16 @@ function ConversionFunnel({ funnel, recoveryRate, auditedCount }: {
         {steps.map((step, index) => (
           <div key={step.label} className="flex items-center flex-1">
             <div className="flex flex-col items-center text-center flex-1">
-              <div className={`w-12 h-12 rounded-full ${step.bg} flex items-center justify-center mb-2`}>
-                <step.icon className={`w-5 h-5 ${step.color}`} />
+              <div className={`w-10 h-10 rounded-full ${step.bg} flex items-center justify-center mb-1`}>
+                <step.icon className={`w-4 h-4 ${step.color}`} />
               </div>
-              <span className="text-2xl font-bold text-white" data-testid={`text-funnel-${step.label.toLowerCase().replace(' ', '-')}`}>
+              <span className="text-xl font-bold text-white" data-testid={`text-funnel-${step.label.toLowerCase().replace(' ', '-')}`}>
                 {step.value.toLocaleString()}
               </span>
-              <span className="text-xs text-slate-500 mt-1">{step.label}</span>
+              <span className="text-xs text-slate-500">{step.label}</span>
             </div>
             {index < steps.length - 1 && (
-              <div className="w-8 h-px bg-white/10 flex-shrink-0" />
+              <div className="w-6 h-px bg-white/10 flex-shrink-0" />
             )}
           </div>
         ))}
