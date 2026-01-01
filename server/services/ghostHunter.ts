@@ -65,6 +65,37 @@ function categorizeDeclineCode(code: string | null | undefined): { declineType: 
   return { declineType: 'soft', failureReason: code };
 }
 
+// Recovery Strategy Selector (Sprint 2.3)
+// Determines the optimal recovery approach based on ML metadata
+// Priority: 3DS issues > High value > Hard declines > Soft declines
+export type RecoveryStrategy = 'technical_bridge' | 'smart_retry' | 'card_refresh' | 'high_value_manual';
+
+interface RecoveryStrategyInput {
+  requires3ds: boolean | null;
+  declineType: 'soft' | 'hard' | null;
+  amount: number; // in cents
+}
+
+export function determineRecoveryStrategy(input: RecoveryStrategyInput): RecoveryStrategy {
+  // Priority 1: Technical issues (authentication required) get bridge approach
+  if (input.requires3ds === true) {
+    return 'technical_bridge';
+  }
+  
+  // Priority 2: High-value invoices (> $500) get manual VIP treatment
+  if (input.amount > 50000) {
+    return 'high_value_manual';
+  }
+  
+  // Priority 3: Hard declines require card refresh
+  if (input.declineType === 'hard') {
+    return 'card_refresh';
+  }
+  
+  // Priority 4: Soft declines (or unknown) get smart retry
+  return 'smart_retry';
+}
+
 interface FailureDetails {
   failureCode: string | null;
   failureMessage: string | null;
@@ -656,6 +687,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
+              // Determine recovery strategy based on ML metadata (Sprint 2.3)
+              const recoveryStrategy = determineRecoveryStrategy({
+                requires3ds: mlMetadata.requires3ds,
+                declineType,
+                amount,
+              });
+
               // UPSERT with latency tracking
               const upsertStart = Date.now();
               await storage.upsertGhostTarget({
@@ -677,6 +715,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 requires3ds: mlMetadata.requires3ds,
                 stripeErrorCode: mlMetadata.stripeErrorCode,
                 originalInvoiceDate: mlMetadata.originalInvoiceDate,
+                // Recovery Strategy Selector (Sprint 2.3)
+                recoveryStrategy,
               });
               const upsertMs = Date.now() - upsertStart;
               telemetry.totalUpsertMs += upsertMs;
@@ -770,6 +810,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         const purgeAt = new Date();
         purgeAt.setDate(purgeAt.getDate() + 90);
         
+        // Impending risks get card_refresh strategy (expiring cards)
+        const recoveryStrategy = determineRecoveryStrategy({
+          requires3ds: null,
+          declineType: 'hard', // Treat expiring cards as hard decline situation
+          amount: risk.amount,
+        });
+        
         await storage.upsertGhostTarget({
           merchantId,
           email: risk.email,
@@ -780,6 +827,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
           status: "impending",
           failureReason: `card_expiring_${risk.expMonth}_${risk.expYear}`,
           declineType: null,
+          recoveryStrategy,
         });
       }
       

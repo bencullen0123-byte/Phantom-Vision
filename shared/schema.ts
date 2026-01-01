@@ -87,6 +87,9 @@ export const ghostTargets = pgTable("ghost_targets", {
   requires3ds: boolean("requires_3ds"), // Technical vs. Financial failure flag
   stripeErrorCode: text("stripe_error_code"), // Raw decline/error code for ML features
   originalInvoiceDate: timestamp("original_invoice_date"), // Temporal anchor for recovery velocity
+  // Recovery Strategy Selector (Sprint 2.3): categorizes ghost for Sentinel recovery approach
+  // Values: 'technical_bridge', 'smart_retry', 'card_refresh', 'high_value_manual'
+  recoveryStrategy: text("recovery_strategy"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -124,6 +127,8 @@ export interface InsertGhostTarget {
   requires3ds?: boolean | null;
   stripeErrorCode?: string | null;
   originalInvoiceDate?: Date | null;
+  // Recovery Strategy Selector (Sprint 2.3)
+  recoveryStrategy?: string | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -154,6 +159,8 @@ export interface GhostTarget {
   requires3ds: boolean | null;
   stripeErrorCode: string | null;
   originalInvoiceDate: Date | null;
+  // Recovery Strategy Selector (Sprint 2.3)
+  recoveryStrategy: string | null;
 }
 
 // Raw database type (encrypted fields)

@@ -28,6 +28,7 @@ interface GhostTarget {
   recoveredAt: string | null;
   recoveryType: string | null;
   declineType: string | null;
+  recoveryStrategy: string | null;
 }
 
 function getStatusBadge(status: string, emailCount: number) {
@@ -53,6 +54,23 @@ function getAttributionBadge(recoveryType: string | null) {
     return <Badge className="bg-emerald-600/20 text-emerald-300 border-emerald-600/30">Direct</Badge>;
   }
   return <Badge className="bg-slate-600/20 text-slate-400 border-slate-600/30">Organic</Badge>;
+}
+
+function getRecoveryStrategyBadge(strategy: string | null) {
+  if (!strategy) return <span className="text-slate-600">-</span>;
+  
+  switch (strategy) {
+    case "technical_bridge":
+      return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">3DS Bridge</Badge>;
+    case "smart_retry":
+      return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Smart Retry</Badge>;
+    case "card_refresh":
+      return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Card Refresh</Badge>;
+    case "high_value_manual":
+      return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">VIP Manual</Badge>;
+    default:
+      return <Badge variant="outline" className="text-slate-400">{strategy}</Badge>;
+  }
 }
 
 function formatCurrency(cents: number): string {
@@ -185,6 +203,7 @@ function GhostLedger() {
                 </Button>
               </TableHead>
               <TableHead className="text-slate-400">Status</TableHead>
+              <TableHead className="text-slate-400">Strategy</TableHead>
               <TableHead className="text-slate-400">Attribution</TableHead>
             </TableRow>
           </TableHeader>
@@ -214,6 +233,9 @@ function GhostLedger() {
                 </TableCell>
                 <TableCell>
                   {getStatusBadge(ghost.status, ghost.emailCount)}
+                </TableCell>
+                <TableCell>
+                  {getRecoveryStrategyBadge(ghost.recoveryStrategy)}
                 </TableCell>
                 <TableCell>
                   {getAttributionBadge(ghost.recoveryType)}

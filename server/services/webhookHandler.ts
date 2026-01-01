@@ -2,6 +2,7 @@
 import Stripe from "stripe";
 import { storage } from "../storage";
 import { decrypt } from "../utils/crypto";
+import { determineRecoveryStrategy } from "./ghostHunter";
 
 interface WebhookResult {
   success: boolean;
@@ -196,6 +197,13 @@ export async function handleInvoicePaymentFailed(
   const purgeAt = new Date();
   purgeAt.setDate(purgeAt.getDate() + 90);
 
+  // Determine recovery strategy based on ML metadata (Sprint 2.3)
+  const recoveryStrategy = determineRecoveryStrategy({
+    requires3ds: mlMetadata.requires3ds,
+    declineType,
+    amount,
+  });
+
   // UPSERT ghost target with forensic metadata
   await storage.upsertGhostTarget({
     merchantId: merchant.id,
@@ -217,6 +225,8 @@ export async function handleInvoicePaymentFailed(
     requires3ds: mlMetadata.requires3ds,
     stripeErrorCode: mlMetadata.stripeErrorCode,
     originalInvoiceDate: mlMetadata.originalInvoiceDate,
+    // Recovery Strategy Selector (Sprint 2.3)
+    recoveryStrategy,
   });
 
   console.log(`[WEBHOOK] Ghost ${existingGhost ? 'updated' : 'created'} for invoice ${invoice.id}`);

@@ -128,6 +128,8 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     requires3ds: dbRecord.requires3ds,
     stripeErrorCode: dbRecord.stripeErrorCode,
     originalInvoiceDate: dbRecord.originalInvoiceDate,
+    // Recovery Strategy Selector (Sprint 2.3)
+    recoveryStrategy: dbRecord.recoveryStrategy,
   };
 }
 
@@ -162,6 +164,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   requires3ds?: boolean | null;
   stripeErrorCode?: string | null;
   originalInvoiceDate?: Date | null;
+  // Recovery Strategy Selector (Sprint 2.3)
+  recoveryStrategy?: string | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -194,6 +198,8 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     requires3ds: target.requires3ds,
     stripeErrorCode: target.stripeErrorCode,
     originalInvoiceDate: target.originalInvoiceDate,
+    // Recovery Strategy Selector (Sprint 2.3)
+    recoveryStrategy: target.recoveryStrategy,
   };
 }
 
@@ -544,6 +550,8 @@ export class DatabaseStorage implements IStorage {
           requires3ds: encryptedPayload.requires3ds,
           stripeErrorCode: encryptedPayload.stripeErrorCode,
           originalInvoiceDate: encryptedPayload.originalInvoiceDate,
+          // Recovery Strategy Selector (Sprint 2.3)
+          recoveryStrategy: encryptedPayload.recoveryStrategy,
         },
       })
       .returning();
