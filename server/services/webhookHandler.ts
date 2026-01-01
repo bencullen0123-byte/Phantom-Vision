@@ -1,14 +1,105 @@
 // Webhook Handler - Processes Stripe webhook events
 import Stripe from "stripe";
 import { storage } from "../storage";
+import { decrypt } from "../utils/crypto";
 
 interface WebhookResult {
   success: boolean;
   message: string;
   ghostRecovered?: boolean;
   ghostProtected?: boolean;
+  ghostCreated?: boolean;
   amountRecovered?: number;
   amountProtected?: number;
+  amountAtRisk?: number;
+}
+
+// Intelligent Decline Branching: Categorize Stripe decline codes
+const SOFT_CODES = new Set([
+  "insufficient_funds", "card_velocity_exceeded", "try_again_later",
+  "processing_error", "reenter_transaction", "do_not_honor",
+]);
+
+const HARD_CODES = new Set([
+  "expired_card", "lost_card", "stolen_card", "incorrect_number",
+  "invalid_cvc", "card_not_supported", "card_declined", "pickup_card",
+]);
+
+function categorizeDeclineCode(code: string | null | undefined): { declineType: 'soft' | 'hard' | null; failureReason: string | null } {
+  if (!code) return { declineType: null, failureReason: null };
+  if (SOFT_CODES.has(code)) return { declineType: 'soft', failureReason: code };
+  if (HARD_CODES.has(code)) return { declineType: 'hard', failureReason: code };
+  return { declineType: 'soft', failureReason: code }; // Unknown defaults to soft
+}
+
+// ML Metadata extraction for real-time forensic capture
+interface MLMetadata {
+  cardBrand: string | null;
+  cardFunding: string | null;
+  countryCode: string | null;
+  requires3ds: boolean | null;
+  stripeErrorCode: string | null;
+  originalInvoiceDate: Date | null;
+}
+
+async function extractMLMetadataFromInvoice(
+  stripe: Stripe,
+  invoice: Stripe.Invoice
+): Promise<MLMetadata> {
+  const result: MLMetadata = {
+    cardBrand: null,
+    cardFunding: null,
+    countryCode: null,
+    requires3ds: null,
+    stripeErrorCode: null,
+    originalInvoiceDate: invoice.created ? new Date(invoice.created * 1000) : null,
+  };
+
+  // Get payment intent ID from invoice
+  const invoiceAny = invoice as any;
+  const paymentIntentId = typeof invoiceAny.payment_intent === 'string'
+    ? invoiceAny.payment_intent
+    : invoiceAny.payment_intent?.id || null;
+
+  if (!paymentIntentId) return result;
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ['payment_method'],
+    });
+
+    // Check for 3DS requirement
+    if (paymentIntent.last_payment_error?.code === 'authentication_required' ||
+        paymentIntent.status === 'requires_action') {
+      result.requires3ds = true;
+    }
+
+    // Extract card details from payment method (NORMALIZED to lowercase)
+    const pm = paymentIntent.payment_method;
+    if (pm && typeof pm !== 'string' && pm.card) {
+      result.cardBrand = pm.card.brand?.toLowerCase() || null;
+      result.cardFunding = pm.card.funding?.toLowerCase() || null;
+      result.countryCode = pm.card.country?.toLowerCase() || null;
+    }
+
+    // Extract error code
+    if (paymentIntent.last_payment_error) {
+      result.stripeErrorCode = paymentIntent.last_payment_error.decline_code ||
+                               paymentIntent.last_payment_error.code || null;
+    }
+  } catch (error: any) {
+    console.log(`[WEBHOOK] Could not fetch PaymentIntent ${paymentIntentId}: ${error.message}`);
+  }
+
+  // Fallback: country from customer address
+  if (!result.countryCode && invoice.customer && typeof invoice.customer !== 'string') {
+    const customer = invoice.customer as Stripe.Customer;
+    if (customer.address?.country) {
+      result.countryCode = customer.address.country.toLowerCase();
+    }
+  }
+
+  return result;
 }
 
 function getPaymentTimingFromTimestamp(timestamp: number): { dayOfWeek: number; hourOfDay: number } {
@@ -16,6 +107,161 @@ function getPaymentTimingFromTimestamp(timestamp: number): { dayOfWeek: number; 
   return {
     dayOfWeek: date.getUTCDay(),
     hourOfDay: date.getUTCHours(),
+  };
+}
+
+// Create Stripe client for merchant API calls using their decrypted token
+function createMerchantStripeClient(accessToken: string): Stripe {
+  return new Stripe(accessToken, {
+    apiVersion: "2025-12-15.clover",
+  });
+}
+
+// Real-time ghost discovery from invoice.payment_failed webhook
+export async function handleInvoicePaymentFailed(
+  invoice: Stripe.Invoice,
+  connectedAccountId?: string
+): Promise<WebhookResult> {
+  console.log(`[WEBHOOK] Processing invoice.payment_failed for invoice ${invoice.id}`);
+
+  // Check if ghost already exists (avoid duplicates)
+  const existingGhost = await storage.getGhostByInvoiceId(invoice.id);
+  if (existingGhost) {
+    console.log(`[WEBHOOK] Ghost already exists for invoice ${invoice.id} - updating`);
+  }
+
+  // Identify merchant by connected account ID or customer lookup
+  let merchant = null;
+  
+  if (connectedAccountId) {
+    merchant = await storage.getMerchantByStripeUserId(connectedAccountId);
+    console.log(`[WEBHOOK] Merchant lookup by account ${connectedAccountId}: ${merchant ? 'found' : 'not found'}`);
+  }
+
+  if (!merchant) {
+    // Fallback: try to find merchant from existing ghost
+    if (existingGhost) {
+      merchant = await storage.getMerchant(existingGhost.merchantId);
+    }
+  }
+
+  if (!merchant) {
+    console.log(`[WEBHOOK] No merchant found for invoice ${invoice.id} - cannot create ghost`);
+    return {
+      success: true,
+      message: "No merchant mapping found for this Stripe account",
+      ghostCreated: false,
+    };
+  }
+
+  // Extract invoice details
+  const customerId = typeof invoice.customer === "string"
+    ? invoice.customer
+    : invoice.customer?.id || null;
+  const email = invoice.customer_email || "unknown";
+  let customerName = invoice.customer_name || email || "Unknown Customer";
+  if (typeof invoice.customer !== "string" && invoice.customer && "name" in invoice.customer) {
+    customerName = (invoice.customer as { name?: string | null }).name || customerName;
+  }
+  const amount = invoice.amount_due || 0;
+  const currency = invoice.currency?.toLowerCase() || 'gbp';
+
+  // Decrypt merchant token for Stripe API calls
+  let stripe: Stripe;
+  try {
+    const accessToken = decrypt(merchant.encryptedToken, merchant.iv, merchant.tag);
+    stripe = createMerchantStripeClient(accessToken);
+  } catch (error: any) {
+    console.error(`[WEBHOOK] Failed to decrypt merchant token: ${error.message}`);
+    return {
+      success: false,
+      message: "Failed to decrypt merchant credentials",
+      ghostCreated: false,
+    };
+  }
+
+  // Extract ML metadata for forensic intelligence
+  const mlMetadata = await extractMLMetadataFromInvoice(stripe, invoice);
+
+  // Extract decline code for branching strategy
+  const lastPaymentError = (invoice as any).last_payment_error;
+  const declineCode = lastPaymentError?.decline_code || mlMetadata.stripeErrorCode || null;
+  const { declineType, failureReason } = categorizeDeclineCode(declineCode);
+
+  // Extract failure details
+  const failureCode = declineCode;
+  const failureMessage = lastPaymentError?.message || null;
+
+  // 90-day purge timestamp
+  const purgeAt = new Date();
+  purgeAt.setDate(purgeAt.getDate() + 90);
+
+  // UPSERT ghost target with forensic metadata
+  await storage.upsertGhostTarget({
+    merchantId: merchant.id,
+    email,
+    customerName,
+    amount,
+    invoiceId: invoice.id,
+    purgeAt,
+    status: "pending",
+    stripeCustomerId: customerId,
+    failureReason,
+    declineType,
+    failureCode,
+    failureMessage,
+    // ML metadata (non-PII, normalized to lowercase)
+    cardBrand: mlMetadata.cardBrand,
+    cardFunding: mlMetadata.cardFunding,
+    countryCode: mlMetadata.countryCode,
+    requires3ds: mlMetadata.requires3ds,
+    stripeErrorCode: mlMetadata.stripeErrorCode,
+    originalInvoiceDate: mlMetadata.originalInvoiceDate,
+  });
+
+  console.log(`[WEBHOOK] Ghost ${existingGhost ? 'updated' : 'created'} for invoice ${invoice.id}`);
+
+  // Update merchant ledger if this is a new invoice
+  if (!existingGhost) {
+    // Increment gross invoiced cents (new invoice discovered)
+    await storage.incrementMerchantGrossInvoiced(merchant.id, amount);
+    console.log(`[WEBHOOK] Incremented grossInvoicedCents by ${amount} for merchant ${merchant.id}`);
+
+    // Increment all-time leaked cents
+    await storage.incrementMerchantLeakedCents(merchant.id, amount);
+    console.log(`[WEBHOOK] Incremented allTimeLeakedCents by ${amount} for merchant ${merchant.id}`);
+  }
+
+  // Update lastAuditAt to trigger UI refresh
+  await storage.updateMerchant(merchant.id, { lastAuditAt: new Date() });
+  console.log(`[WEBHOOK] Updated lastAuditAt for merchant ${merchant.id}`);
+
+  // Log to system for Intelligence Feed
+  const ghostPayload = {
+    type: "ghost_discovered",
+    source: "webhook",
+    invoiceId: invoice.id,
+    amount,
+    currency,
+    declineType,
+    failureCode,
+    cardBrand: mlMetadata.cardBrand,
+  };
+  await storage.createSystemLog({
+    jobName: "webhook_ghost_discovery",
+    status: "success",
+    details: JSON.stringify(ghostPayload),
+    errorMessage: null,
+  });
+
+  const formattedAmount = formatCentsToDisplay(amount, currency);
+  console.log(`[WEBHOOK] Real-time ghost discovery: ${email} - ${formattedAmount} at risk (${declineType || 'unknown'} decline)`);
+
+  return {
+    success: true,
+    message: `Ghost ${existingGhost ? 'updated' : 'created'} for invoice ${invoice.id}`,
+    ghostCreated: !existingGhost,
+    amountAtRisk: amount,
   };
 }
 
@@ -186,11 +432,18 @@ export async function handleWebhookEvent(
 ): Promise<WebhookResult> {
   console.log(`[WEBHOOK] Received event: ${event.type}`);
 
+  // Extract connected account ID for merchant lookup (Stripe Connect)
+  const connectedAccountId = (event as any).account || undefined;
+
   switch (event.type) {
     case "invoice.paid":
     case "invoice.payment_succeeded":
-      const invoice = event.data.object as Stripe.Invoice;
-      return handleInvoicePaid(invoice);
+      const paidInvoice = event.data.object as Stripe.Invoice;
+      return handleInvoicePaid(paidInvoice);
+
+    case "invoice.payment_failed":
+      const failedInvoice = event.data.object as Stripe.Invoice;
+      return handleInvoicePaymentFailed(failedInvoice, connectedAccountId);
 
     case "customer.subscription.updated":
       const subscription = event.data.object as Stripe.Subscription;
