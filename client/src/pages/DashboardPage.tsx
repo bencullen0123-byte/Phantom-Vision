@@ -2,7 +2,7 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText, RefreshCw, Clock } from "lucide-react";
+import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -257,168 +257,15 @@ function RevenueSavedCard({ amount, currency }: { amount: number; currency: stri
   );
 }
 
-function CommandHeader() {
-  const { merchant } = useMerchant();
-  const { stats, refetch: refetchStats } = useMerchantStats();
-  const { toast } = useToast();
-
-  const formatEuro = (cents: number) => {
-    return new Intl.NumberFormat("en-IE", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(cents / 100);
-  };
-
-  const formatRelativeTime = (dateString: string | null) => {
-    if (!dateString) return "Never";
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return `${diffDays}d ago`;
-  };
-
-  const auditMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
-      return { data: await res.json(), status: res.status };
-    },
-    onSuccess: ({ data, status }) => {
-      if (status === 202) {
-        toast({
-          title: "Audit Initiated",
-          description: "Scanning in background...",
-        });
-      } else {
-        toast({
-          title: "Audit Complete",
-          description: `Found ${data.total_ghosts_found} ghosts.`,
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
-      refetchStats();
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Audit Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const isArmed = merchant?.autoPilotEnabled || false;
-  const volumeGuarded = stats?.grossInvoicedCents || 0;
-  const activeLeakage = stats?.lifetime?.allTimeLeakedCents || 0;
-  const revenueSaved = (stats?.lifetime?.totalRecoveredCents || 0) + (stats?.totalProtectedCents || 0);
-  const lastAudit = stats?.lastAuditAt;
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-8 py-3 px-6 border-b border-white/10 bg-slate-900/50 -mx-6 -mt-6 mb-6">
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-full bg-indigo-500/20 flex items-center justify-center">
-          <Shield className="w-4 h-4 text-indigo-400" />
-        </div>
-        <div>
-          <p 
-            className="text-lg font-bold text-white tabular-nums"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-volume-guarded"
-          >
-            {formatEuro(volumeGuarded)}
-          </p>
-          <p className="text-xs text-slate-500">Volume Guarded</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-8">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isArmed ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
-          <span className={`text-sm font-medium ${isArmed ? "text-emerald-400" : "text-slate-400"}`} data-testid="text-sentinel-status">
-            {isArmed ? "Sentinel Active" : "Sentinel Standby"}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <span 
-            className="text-sm font-bold text-red-400/80 tabular-nums"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-active-leakage"
-          >
-            {formatEuro(activeLeakage)}
-          </span>
-          <span className="text-xs text-slate-500">Active Leakage</span>
-        </div>
-        
-        <Button
-          variant="outline"
-          size="sm"
-          className="border-white/10 text-slate-300"
-          onClick={() => auditMutation.mutate()}
-          disabled={auditMutation.isPending}
-          data-testid="button-refresh-audit"
-        >
-          {auditMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4" />
-          )}
-          <span className="hidden sm:inline ml-2">Refresh</span>
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-8">
-        <div className="text-right">
-          <p 
-            className="text-lg font-bold text-emerald-400 tabular-nums"
-            style={{ 
-              fontFamily: "JetBrains Mono, monospace",
-              textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
-            }}
-            data-testid="text-command-revenue-saved"
-          >
-            {formatEuro(revenueSaved)}
-          </p>
-          <p className="text-xs text-emerald-500/70">Revenue Saved</p>
-        </div>
-        
-        <div className="text-right">
-          <div className="flex items-center gap-1 text-slate-400">
-            <Clock className="w-3 h-3" />
-            <p className="text-sm font-medium tabular-nums" data-testid="text-last-audit">
-              {formatRelativeTime(lastAudit || null)}
-            </p>
-          </div>
-          <p className="text-xs text-slate-500">Last Audit</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DashboardMetrics() {
-  const { stats, isLoading } = useMerchantStats();
+  const { stats } = useMerchantStats();
   
-  // Fetch diagnostic pulse for "Audited" count
   const { data: diagnosticPulse } = useQuery<DiagnosticPulse>({
     queryKey: ["/api/diagnostic-pulse"],
   });
-  
-  const totalRecoveredCents = stats?.lifetime?.totalRecoveredCents || 0;
-  const totalProtectedCents = stats?.totalProtectedCents || 0;
-  const revenueSaved = totalRecoveredCents + totalProtectedCents;
 
   return (
     <div className="space-y-6">
-      <CommandHeader />
-      
       <DiagnosticTrident />
       
       <ConversionFunnel 

@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Settings, DollarSign, LogOut, Clock, Shield } from "lucide-react";
+import { LayoutDashboard, Settings, DollarSign, LogOut, Clock, Shield, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -21,8 +21,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMerchant } from "@/context/MerchantContext";
+import { useMerchantStats } from "@/hooks/use-merchant-stats";
+import { useMutation } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 interface NavItem {
   label: string;
@@ -191,47 +194,129 @@ function AppSidebar() {
   );
 }
 
+function formatEuro(cents: number): string {
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(cents / 100);
+}
+
 function GlobalHeader() {
   const { merchant } = useMerchant();
+  const { stats, refetch: refetchStats } = useMerchantStats();
+  const { toast } = useToast();
 
-  const grossVolume = merchant?.grossInvoicedCents ?? 0;
-  const currency = merchant?.defaultCurrency ?? "usd";
-  const lastAudit = merchant?.lastAuditAt ?? null;
+  const auditMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
+      return { data: await res.json(), status: res.status };
+    },
+    onSuccess: ({ data, status }) => {
+      if (status === 202) {
+        toast({
+          title: "Audit Initiated",
+          description: "Scanning in background...",
+        });
+      } else {
+        toast({
+          title: "Audit Complete",
+          description: `Found ${data.total_ghosts_found} ghosts.`,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      refetchStats();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Audit Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const isArmed = merchant?.autoPilotEnabled || false;
+  const volumeGuarded = stats?.grossInvoicedCents || 0;
+  const activeLeakage = stats?.lifetime?.allTimeLeakedCents || 0;
+  const revenueSaved = (stats?.lifetime?.totalRecoveredCents || 0) + (stats?.totalProtectedCents || 0);
+  const lastAudit = stats?.lastAuditAt || null;
 
   return (
-    <header className="h-14 border-b border-white/10 bg-obsidian/95 backdrop-blur-sm sticky top-0 z-40 flex items-center justify-between px-4 gap-4">
-      <div className="flex items-center gap-3">
+    <header className="h-12 border-b border-white/10 bg-obsidian/95 backdrop-blur-sm sticky top-0 z-40 flex items-center justify-between px-4 gap-6">
+      <div className="flex items-center gap-4">
         <SidebarTrigger className="text-slate-400 hover:text-white" data-testid="button-sidebar-toggle" />
-        <div className="h-6 w-px bg-white/10" />
-        <div className="flex items-center gap-2 text-sm">
+        <div className="h-5 w-px bg-white/10" />
+        <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-indigo-400" />
-          <span className="text-slate-400">Volume Guarded:</span>
           <span 
-            className="text-white font-mono font-medium"
-            data-testid="text-gross-volume"
+            className="text-sm font-bold text-white tabular-nums"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-volume-guarded"
           >
-            {formatCurrency(grossVolume, currency)}
+            {formatEuro(volumeGuarded)}
           </span>
+          <span className="text-xs text-slate-500 hidden sm:inline">Guarded</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 text-sm">
-          <Clock className="w-4 h-4 text-slate-500" />
-          <span className="text-slate-500">Last Audit:</span>
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isArmed ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+          <span className={`text-xs font-medium ${isArmed ? "text-emerald-400" : "text-slate-500"}`} data-testid="text-sentinel-status">
+            {isArmed ? "Sentinel Active" : "Standby"}
+          </span>
+        </div>
+        
+        <div className="flex items-center gap-1.5">
           <span 
-            className="text-slate-300 font-mono"
-            data-testid="text-last-audit"
+            className="text-sm font-bold text-red-400/80 tabular-nums"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-active-leakage"
           >
+            {formatEuro(activeLeakage)}
+          </span>
+          <span className="text-xs text-slate-500 hidden sm:inline">Leakage</span>
+        </div>
+        
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-slate-400 hover:text-white"
+          onClick={() => auditMutation.mutate()}
+          disabled={auditMutation.isPending}
+          data-testid="button-refresh-audit"
+        >
+          {auditMutation.isPending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-1.5">
+          <span 
+            className="text-sm font-bold text-emerald-400 tabular-nums"
+            style={{ 
+              fontFamily: "JetBrains Mono, monospace",
+              textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
+            }}
+            data-testid="text-revenue-saved"
+          >
+            {formatEuro(revenueSaved)}
+          </span>
+          <span className="text-xs text-emerald-500/70 hidden sm:inline">Saved</span>
+        </div>
+        
+        <div className="flex items-center gap-1 text-slate-500">
+          <Clock className="w-3 h-3" />
+          <span className="text-xs tabular-nums" data-testid="text-last-audit">
             {formatRelativeTime(lastAudit)}
           </span>
         </div>
-        <span 
-          className="font-mono text-xs text-slate-500"
-          data-testid="text-version"
-        >
-          v1.0.0
-        </span>
       </div>
     </header>
   );
