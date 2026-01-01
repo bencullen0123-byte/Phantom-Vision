@@ -3,6 +3,39 @@ import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
 
+// Rate limiting for Sentinel Auto-Pilot (Safety Valve: 50 emails/hour/merchant)
+const RATE_LIMIT_PER_HOUR = 50;
+const rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
+
+function getHourlyEmailCount(merchantId: string): number {
+  const now = Date.now();
+  const hourInMs = 60 * 60 * 1000;
+  const record = rateLimitTracker.get(merchantId);
+  
+  if (!record || (now - record.windowStart) > hourInMs) {
+    return 0;
+  }
+  return record.count;
+}
+
+function incrementHourlyEmailCount(merchantId: string): void {
+  const now = Date.now();
+  const hourInMs = 60 * 60 * 1000;
+  const record = rateLimitTracker.get(merchantId);
+  
+  if (!record || (now - record.windowStart) > hourInMs) {
+    rateLimitTracker.set(merchantId, { count: 1, windowStart: now });
+  } else {
+    record.count++;
+  }
+}
+
+function canSendEmail(merchantId: string): boolean {
+  return getHourlyEmailCount(merchantId) < RATE_LIMIT_PER_HOUR;
+}
+
+export { getHourlyEmailCount, incrementHourlyEmailCount, canSendEmail, RATE_LIMIT_PER_HOUR };
+
 export interface MerchantStats {
   totalGhostsFound: number;
   activeGhosts: number;

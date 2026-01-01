@@ -1,7 +1,8 @@
 // Pulse Engine - Orchestrates recovery and protection email timing using Oracle data
-import { storage } from "../storage";
+import { storage, canSendEmail, incrementHourlyEmailCount, getHourlyEmailCount, RATE_LIMIT_PER_HOUR } from "../storage";
 import { sendPulseEmail } from "./pulseMailer";
 import type { GhostTarget, Merchant } from "@shared/schema";
+import { mapFailureToCategory } from "@shared/leakageCategories";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -20,6 +21,9 @@ interface ProcessQueueResult {
   nextGoldenHour: string | null;
   errors: string[];
   dryRunMode: boolean;
+  autoPilotEnabled: boolean;
+  rateLimited: number;
+  pendingManualReview: number;
 }
 
 function isWithinGoldenHour(goldenHour: GoldenHour | null): boolean {
@@ -112,6 +116,41 @@ async function processTargetWithMerchant(
   return { sent: false, error: result.error };
 }
 
+async function logSentinelAction(
+  target: GhostTarget,
+  merchant: Merchant,
+  success: boolean,
+  dryRun: boolean = false
+): Promise<void> {
+  const category = mapFailureToCategory(target.failureCode || target.failureReason);
+  const emailType = target.status === 'impending' ? 'Protection' : 'Recovery';
+  const resultText = dryRun ? 'Dry Run' : (success ? 'Success' : 'Failed');
+  
+  // Mask email for privacy in logs
+  const maskedEmail = target.email.replace(/(.{3}).*@/, '$1...@');
+  
+  const details = JSON.stringify({
+    type: 'sentinel_action',
+    emailType: emailType.toLowerCase(),
+    category: category.label,
+    targetId: target.id,
+    maskedEmail,
+    amount: target.amount,
+    currency: merchant.defaultCurrency || 'gbp',
+    success,
+    dryRun,
+  });
+  
+  await storage.createSystemLog({
+    jobName: 'sentinel',
+    status: success ? 'success' : 'error',
+    details,
+    errorMessage: success ? null : 'Email delivery failed',
+  });
+  
+  console.log(`[SENTINEL] ${emailType} email to ${maskedEmail} - ${resultText} (${category.label})`);
+}
+
 export async function processQueue(): Promise<ProcessQueueResult> {
   console.log("[PULSE ENGINE] Starting queue processing...");
   
@@ -123,7 +162,10 @@ export async function processQueue(): Promise<ProcessQueueResult> {
     protectionEmails: 0,
     nextGoldenHour: null,
     errors: [],
-    dryRunMode: false
+    dryRunMode: false,
+    autoPilotEnabled: false,
+    rateLimited: 0,
+    pendingManualReview: 0,
   };
   
   try {
@@ -160,6 +202,26 @@ export async function processQueue(): Promise<ProcessQueueResult> {
         merchantCache.set(target.merchantId, merchant);
       }
       
+      // Track if any merchant has Auto-Pilot enabled
+      if (merchant.autoPilotEnabled) {
+        result.autoPilotEnabled = true;
+      }
+      
+      // Auto-Pilot Check: Skip processing if Auto-Pilot is disabled
+      if (!merchant.autoPilotEnabled) {
+        result.pendingManualReview++;
+        console.log(`[PULSE ENGINE] Target ${target.id} queued for manual review (Auto-Pilot OFF)`);
+        continue;
+      }
+      
+      // Safety Valve: Rate limiting (50 emails/hour/merchant)
+      if (!canSendEmail(merchant.id)) {
+        result.rateLimited++;
+        const currentCount = getHourlyEmailCount(merchant.id);
+        console.log(`[SENTINEL] Rate limit reached for merchant ${merchant.id} (${currentCount}/${RATE_LIMIT_PER_HOUR}/hour)`);
+        continue;
+      }
+      
       let goldenHour = goldenHourCache.get(target.merchantId);
       if (goldenHour === undefined) {
         goldenHour = await storage.getGoldenHour(target.merchantId);
@@ -178,6 +240,10 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       
       if (processResult.sent) {
         result.emailsSent++;
+        incrementHourlyEmailCount(merchant.id);
+        
+        // Log Sentinel action for audit trail
+        await logSentinelAction(target, merchant, true, processResult.dryRun);
         
         if (target.status === 'pending') {
           result.recoveryEmails++;
@@ -193,6 +259,10 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       } else {
         if (processResult.error !== 'Outside golden hour window') {
           result.emailsFailed++;
+          
+          // Log failed Sentinel action
+          await logSentinelAction(target, merchant, false);
+          
           if (processResult.error) {
             result.errors.push(`Target ${target.id}: ${processResult.error}`);
           }
@@ -207,6 +277,9 @@ export async function processQueue(): Promise<ProcessQueueResult> {
     console.log(`[PULSE ENGINE] Queue processing complete:`);
     console.log(`[PULSE ENGINE]   - Sent: ${result.emailsSent} (Recovery: ${result.recoveryEmails}, Protection: ${result.protectionEmails})`);
     console.log(`[PULSE ENGINE]   - Failed: ${result.emailsFailed}`);
+    console.log(`[PULSE ENGINE]   - Pending Manual Review: ${result.pendingManualReview}`);
+    console.log(`[PULSE ENGINE]   - Rate Limited: ${result.rateLimited}`);
+    console.log(`[PULSE ENGINE]   - Auto-Pilot: ${result.autoPilotEnabled ? 'ENABLED' : 'DISABLED'}`);
     if (result.dryRunMode) {
       console.log(`[PULSE ENGINE]   - Mode: DRY RUN (Resend not connected)`);
     }
