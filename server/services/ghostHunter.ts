@@ -495,11 +495,10 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
           logTelemetryHeartbeat(telemetry);
         }
 
-        // STRICT EXCLUSION: void status invoices are never processed
-        // Only open, uncollectible, or draft invoices qualify for Ghost detection
-        // (draft included temporarily for testing with seeded data)
+        // HAMMER DIRECTIVE: Relaxed Status Firewall
+        // Include incomplete and draft statuses to capture test scenarios and real-world failed initial payments
         if (invoice.status === "open" || invoice.status === "uncollectible" || 
-            invoice.status === "draft") {
+            invoice.status === "draft" || (invoice as any).status === "incomplete") {
           const customerId = typeof invoice.customer === "string" 
             ? invoice.customer 
             : invoice.customer?.id;

@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import { storage } from "../storage";
 import { decrypt } from "../utils/crypto";
 
-const TEST_MERCHANT_ID = "8543bb9f-cda8-4631-951d-70fc7c01ec01";
+const TEST_MERCHANT_ID = "395d4e40-7daf-4d55-9843-78403f2bc9fd";
 const PRODUCT_NAME = "PHANTOM Test Tier";
 const EMAIL_BASE = "bencullen0123+phantom";
 
@@ -12,9 +12,9 @@ const PRICE_TIERS = [2500, 4900, 9900, 19900, 49900];
 // Multi-Currency Support
 const CURRENCIES: ("gbp" | "usd" | "eur")[] = ["gbp", "usd", "eur"];
 
-// Volume Expansion: 50 Paid, 25 Ghosts, 15 Risks = 90 total
-const GHOST_COUNT = 25;
-const RISK_COUNT = 15;
+// HAMMER DIRECTIVE: 30 Ghosts + 20 Risks = 50 ledger records
+const GHOST_COUNT = 30;
+const RISK_COUNT = 20;
 const SUCCESS_COUNT = 50;
 
 interface SeederResult {
@@ -118,50 +118,54 @@ async function createGhostScenario(
   
   console.log(`[SEEDER] Creating Ghost #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
   
-  // Get or create price for this amount/currency combo
-  const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
+  let customerId = `cus_mock_ghost_${index}`;
+  let invoiceId = `inv_mock_ghost_${index}_${Date.now()}`;
+  let invoiceAmount = amount;
   
-  // Create customer without source first
-  const customer = await stripe.customers.create({
-    email,
-    name: customerName,
-    metadata: {
-      phantom_test: "true",
-      scenario: "ghost"
-    }
-  });
-  
-  // Attach the decline-triggering card token
+  // HAMMER DIRECTIVE: Stripe operations inside try/catch, persistence guaranteed outside
   try {
-    await stripe.customers.createSource(customer.id, { source: "tok_chargeDeclined" });
-  } catch (err: any) {
-    // Expected - card will be declined
-  }
-  
-  // Create subscription with allow_incomplete
-  try {
-    await stripe.subscriptions.create({
-      customer: customer.id,
-      items: [{ price: priceId }],
+    const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
+    
+    const customer = await stripe.customers.create({
+      email,
+      name: customerName,
       metadata: {
         phantom_test: "true",
         scenario: "ghost"
-      },
-      payment_behavior: "allow_incomplete",
+      }
     });
-  } catch (err: any) {
-    // Expected - subscription may fail without payment method
+    customerId = customer.id;
+    
+    try {
+      await stripe.customers.createSource(customer.id, { source: "tok_chargeDeclined" });
+    } catch (err: any) {
+      // Expected - card will be declined
+    }
+    
+    try {
+      await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: priceId }],
+        metadata: {
+          phantom_test: "true",
+          scenario: "ghost"
+        },
+        payment_behavior: "allow_incomplete",
+      });
+    } catch (err: any) {
+      // Expected - subscription may fail
+    }
+    
+    const invoices = await stripe.invoices.list({ customer: customer.id, limit: 1 });
+    if (invoices.data.length > 0) {
+      invoiceId = invoices.data[0].id;
+      invoiceAmount = invoices.data[0].amount_due || amount;
+    }
+  } catch (stripeErr: any) {
+    console.log(`[SEEDER] Ghost #${index} Stripe failed (${stripeErr.message}), using mock IDs`);
   }
   
-  // DIRECT INJECTION: Fetch invoice or use synthetic ID
-  const invoices = await stripe.invoices.list({ customer: customer.id, limit: 1 });
-  const invoiceId = invoices.data.length > 0 
-    ? invoices.data[0].id 
-    : `phantom_seed_ghost_${index}_${Date.now()}`;
-  const invoiceAmount = invoices.data.length > 0 
-    ? (invoices.data[0].amount_due || amount) 
-    : amount;
-  
+  // GUARANTEED PERSISTENCE: Always inject to ledger regardless of Stripe status
   const purgeAt = new Date();
   purgeAt.setDate(purgeAt.getDate() + 90);
   
@@ -172,9 +176,9 @@ async function createGhostScenario(
     amount: invoiceAmount,
     invoiceId,
     purgeAt,
-    discoveredAt, // Time-travel: backdate the discovery
+    discoveredAt,
     status: "pending",
-    stripeCustomerId: customer.id,
+    stripeCustomerId: customerId,
     failureReason: "card_declined",
     declineType: "hard",
   });
@@ -197,34 +201,42 @@ async function createRiskScenario(
   
   console.log(`[SEEDER] Creating Risk #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, expires ${expMonth}/2026, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
   
-  const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
+  let customerId = `cus_mock_risk_${index}`;
+  let subscriptionId = `sub_mock_risk_${index}_${Date.now()}`;
   
-  // Create customer with source token
-  const customer = await stripe.customers.create({
-    email,
-    name: customerName,
-    source: "tok_visa",
-    metadata: {
-      phantom_test: "true",
-      scenario: "risk",
-      simulated_exp_month: String(expMonth),
-      simulated_exp_year: "2026"
-    }
-  });
+  // HAMMER DIRECTIVE: Stripe operations inside try/catch, persistence guaranteed outside
+  try {
+    const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
+    
+    const customer = await stripe.customers.create({
+      email,
+      name: customerName,
+      source: "tok_visa",
+      metadata: {
+        phantom_test: "true",
+        scenario: "risk",
+        simulated_exp_month: String(expMonth),
+        simulated_exp_year: "2026"
+      }
+    });
+    customerId = customer.id;
+    
+    const subscription = await stripe.subscriptions.create({
+      customer: customer.id,
+      items: [{ price: priceId }],
+      metadata: {
+        phantom_test: "true",
+        scenario: "risk",
+        simulated_exp_month: String(expMonth),
+        simulated_exp_year: "2026"
+      }
+    });
+    subscriptionId = subscription.id;
+  } catch (stripeErr: any) {
+    console.log(`[SEEDER] Risk #${index} Stripe failed (${stripeErr.message}), using mock IDs`);
+  }
   
-  // Create subscription
-  const subscription = await stripe.subscriptions.create({
-    customer: customer.id,
-    items: [{ price: priceId }],
-    metadata: {
-      phantom_test: "true",
-      scenario: "risk",
-      simulated_exp_month: String(expMonth),
-      simulated_exp_year: "2026"
-    }
-  });
-  
-  // DIRECT INJECTION
+  // GUARANTEED PERSISTENCE: Always inject to ledger regardless of Stripe status
   const purgeAt = new Date();
   purgeAt.setDate(purgeAt.getDate() + 90);
   
@@ -233,14 +245,14 @@ async function createRiskScenario(
     email,
     customerName,
     amount,
-    invoiceId: `impending_${subscription.id}`,
+    invoiceId: `impending_${subscriptionId}`,
     purgeAt,
-    discoveredAt, // Time-travel
+    discoveredAt,
     status: "impending",
-    stripeCustomerId: customer.id,
+    stripeCustomerId: customerId,
   });
   
-  console.log(`[SEEDER] Risk #${index} injected: ${subscription.id}, ${currency.toUpperCase()} ${amount/100}`);
+  console.log(`[SEEDER] Risk #${index} injected: ${subscriptionId}, ${currency.toUpperCase()} ${amount/100}`);
 }
 
 async function createSuccessScenario(
