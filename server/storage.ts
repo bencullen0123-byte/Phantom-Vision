@@ -278,6 +278,7 @@ export interface IStorage {
   createSystemLog(log: InsertSystemLog): Promise<SystemLog>;
   getRecentSystemLogs(limit: number): Promise<SystemLog[]>;
   getDiagnosticPulse(merchantId: string): Promise<DiagnosticPulse>;
+  getGoldenHourGhosts(merchantId: string): Promise<{ count: number; oldestMinutesAgo: number | null }>;
   
   // Cron Locks (Atomic Job Locking)
   acquireJobLock(jobName: string, ttlMinutes: number): Promise<{ holderId: string; wasStolen: boolean } | null>;
@@ -884,6 +885,42 @@ export class DatabaseStorage implements IStorage {
       cardBrandDistribution,
       lastScanAt: latestLog?.runAt?.toISOString() || null,
       lastScanStatus: latestLog?.status || null,
+    };
+  }
+
+  async getGoldenHourGhosts(merchantId: string): Promise<{ count: number; oldestMinutesAgo: number | null }> {
+    const goldenHourThreshold = 60; // 60 minutes = 1 hour
+    const now = new Date();
+    
+    // Get pending ghosts discovered within the golden hour window
+    const pendingGhosts = await db
+      .select({
+        discoveredAt: ghostTargets.discoveredAt,
+      })
+      .from(ghostTargets)
+      .where(and(
+        eq(ghostTargets.merchantId, merchantId),
+        eq(ghostTargets.status, "pending")
+      ))
+      .orderBy(ghostTargets.discoveredAt);
+
+    // Filter to those within golden hour (discovered within last 60 minutes)
+    const goldenHourGhosts = pendingGhosts.filter(ghost => {
+      if (!ghost.discoveredAt) return false;
+      const discoveredAt = new Date(ghost.discoveredAt);
+      const minutesAgo = (now.getTime() - discoveredAt.getTime()) / (1000 * 60);
+      return minutesAgo <= goldenHourThreshold;
+    });
+
+    let oldestMinutesAgo: number | null = null;
+    if (goldenHourGhosts.length > 0 && goldenHourGhosts[0].discoveredAt) {
+      const oldest = new Date(goldenHourGhosts[0].discoveredAt);
+      oldestMinutesAgo = Math.round((now.getTime() - oldest.getTime()) / (1000 * 60));
+    }
+
+    return {
+      count: goldenHourGhosts.length,
+      oldestMinutesAgo,
     };
   }
 

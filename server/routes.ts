@@ -532,6 +532,23 @@ export async function registerRoutes(
     }
   });
 
+  // Golden Hour API - returns count of pending ghosts within optimal recovery window
+  app.get("/api/golden-hour", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const goldenHourData = await storage.getGoldenHourGhosts(merchantId);
+      return res.json(goldenHourData);
+    } catch (error: any) {
+      console.error("[GOLDEN HOUR] Failed to retrieve golden hour data:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve golden hour data",
+        error: error.message
+      });
+    }
+  });
+
   // Ghost Targets API - returns decrypted ghost targets for authenticated merchant
   app.get("/api/merchant/ghosts", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
