@@ -667,10 +667,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         });
       }
       
-      // Update merchant's impending leakage cents
-      if (telemetry.impendingRiskTally > 0) {
-        await storage.updateMerchantImpendingLeakage(merchantId, telemetry.impendingRiskTally);
-        console.log(`[GHOST HUNTER] Impending leakage updated: ${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk from ${telemetry.impendingCount} expiring cards`);
+      // Impending leakage now calculated live from ghost_targets via getHistoricalRevenueStats
+      if (telemetry.impendingCount > 0) {
+        console.log(`[GHOST HUNTER] Impending risks detected: ${telemetry.impendingCount} expiring cards, $${(telemetry.impendingRiskTally / 100).toFixed(2)} MRR at risk`);
       }
       
     } catch (error: any) {

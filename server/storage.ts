@@ -398,12 +398,14 @@ export class DatabaseStorage implements IStorage {
     const monthlyTrend = await this.getMonthlyTrend(merchantId);
     const dailyPulse = await this.getDailyPulse(merchantId);
     
-    // Live aggregate from ghost_targets instead of stale merchant columns
+    // Pure Ledger Model: Live aggregate from ghost_targets (no stale merchant columns)
+    // All-Time Leaked: Every ghost ever discovered
+    // Active Leakage (Money on Table): All ghosts except recovered
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(*)::bigint AS total_count,
-        COALESCE(SUM(CASE WHEN status IN ('pending', 'impending') THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
         COALESCE(SUM(amount), 0)::bigint AS all_time_leaked,
+        COALESCE(SUM(CASE WHEN status != 'recovered' THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
         COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered,
         COALESCE(SUM(CASE WHEN status = 'impending' THEN amount ELSE 0 END), 0)::bigint AS impending_leakage,
         COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected
