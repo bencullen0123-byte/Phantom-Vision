@@ -78,6 +78,15 @@ export interface HistoricalRevenueStats {
   recoveryRate: number; // (recoveredCount / totalGhosts) * 100
 }
 
+// Sprint 4.1.3: Diagnostic Pulse - Real-time funnel metadata from last Ghost Hunter run
+export interface DiagnosticPulse {
+  totalInvoicesScanned: number;     // Drives "Audited" step in funnel
+  requires3dsCount: number;         // Technical friction insight
+  cardBrandDistribution: Record<string, number>; // DNA breakdown by card brand
+  lastScanAt: string | null;        // When the last ghost_hunter job ran
+  lastScanStatus: string | null;    // success/failure/skipped
+}
+
 export interface ShadowRevenueUpdate {
   allTimeLeakedCents: number;
   totalGhostCount: number;
@@ -268,6 +277,7 @@ export interface IStorage {
   // System Logs
   createSystemLog(log: InsertSystemLog): Promise<SystemLog>;
   getRecentSystemLogs(limit: number): Promise<SystemLog[]>;
+  getDiagnosticPulse(merchantId: string): Promise<DiagnosticPulse>;
   
   // Cron Locks (Atomic Job Locking)
   acquireJobLock(jobName: string, ttlMinutes: number): Promise<{ holderId: string; wasStolen: boolean } | null>;
@@ -821,6 +831,60 @@ export class DatabaseStorage implements IStorage {
       .from(systemLogs)
       .orderBy(desc(systemLogs.runAt))
       .limit(limit);
+  }
+
+  async getDiagnosticPulse(merchantId: string): Promise<DiagnosticPulse> {
+    // Get the most recent ghost_hunter job log
+    const [latestLog] = await db
+      .select()
+      .from(systemLogs)
+      .where(eq(systemLogs.jobName, "ghost_hunter"))
+      .orderBy(desc(systemLogs.runAt))
+      .limit(1);
+
+    // Parse totalInvoicesScanned from log details (funnel.total)
+    let totalInvoicesScanned = 0;
+    if (latestLog?.details) {
+      try {
+        const details = JSON.parse(latestLog.details);
+        totalInvoicesScanned = details.funnel?.total || 0;
+      } catch (e) {
+        // Fallback if parsing fails
+      }
+    }
+
+    // Get requires3ds count from ghost_targets for this merchant
+    const [requires3dsResult] = await db
+      .select({ count: count() })
+      .from(ghostTargets)
+      .where(and(
+        eq(ghostTargets.merchantId, merchantId),
+        eq(ghostTargets.requires3ds, true)
+      ));
+
+    // Get card brand distribution from ghost_targets for this merchant
+    const cardBrandRows = await db
+      .select({
+        cardBrand: ghostTargets.cardBrand,
+        count: count(),
+      })
+      .from(ghostTargets)
+      .where(eq(ghostTargets.merchantId, merchantId))
+      .groupBy(ghostTargets.cardBrand);
+
+    const cardBrandDistribution: Record<string, number> = {};
+    for (const row of cardBrandRows) {
+      const brand = row.cardBrand || "unknown";
+      cardBrandDistribution[brand] = Number(row.count);
+    }
+
+    return {
+      totalInvoicesScanned,
+      requires3dsCount: Number(requires3dsResult?.count || 0),
+      cardBrandDistribution,
+      lastScanAt: latestLog?.runAt?.toISOString() || null,
+      lastScanStatus: latestLog?.status || null,
+    };
   }
 
   // Cron Locks (Atomic Job Locking)
