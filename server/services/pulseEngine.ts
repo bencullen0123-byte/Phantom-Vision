@@ -2,7 +2,7 @@
 import { storage, canSendEmail, incrementHourlyEmailCount, getHourlyEmailCount, RATE_LIMIT_PER_HOUR } from "../storage";
 import { sendPulseEmail } from "./pulseMailer";
 import type { GhostTarget, Merchant } from "@shared/schema";
-import { mapFailureToCategory } from "@shared/leakageCategories";
+import { mapFailureCodeToCategory } from "@shared/leakageCategories";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -122,7 +122,7 @@ async function logSentinelAction(
   success: boolean,
   dryRun: boolean = false
 ): Promise<void> {
-  const category = mapFailureToCategory(target.failureCode || target.failureReason);
+  const category = mapFailureCodeToCategory(target.failureCode || target.failureReason);
   const emailType = target.status === 'impending' ? 'Protection' : 'Recovery';
   const resultText = dryRun ? 'Dry Run' : (success ? 'Success' : 'Failed');
   
@@ -132,7 +132,7 @@ async function logSentinelAction(
   const details = JSON.stringify({
     type: 'sentinel_action',
     emailType: emailType.toLowerCase(),
-    category: category.label,
+    category,
     targetId: target.id,
     maskedEmail,
     amount: target.amount,
@@ -148,7 +148,7 @@ async function logSentinelAction(
     errorMessage: success ? null : 'Email delivery failed',
   });
   
-  console.log(`[SENTINEL] ${emailType} email to ${maskedEmail} - ${resultText} (${category.label})`);
+  console.log(`[SENTINEL] ${emailType} email to ${maskedEmail} - ${resultText} (${category})`);
 }
 
 export async function processQueue(): Promise<ProcessQueueResult> {

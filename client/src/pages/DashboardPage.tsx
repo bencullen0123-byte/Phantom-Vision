@@ -1,6 +1,7 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Shield, TrendingDown, TrendingUp } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Search, Shield, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -116,6 +117,63 @@ function DeepHarvestGate() {
   );
 }
 
+function AutoPilotToggle() {
+  const { merchant, refetch } = useMerchant();
+  const { toast } = useToast();
+
+  const toggleMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await apiRequest("PATCH", "/api/merchant/branding", {
+        autoPilotEnabled: enabled,
+      });
+      return res.json();
+    },
+    onSuccess: (_, enabled) => {
+      toast({
+        title: enabled ? "Auto-Pilot Activated" : "Auto-Pilot Deactivated",
+        description: enabled 
+          ? "PHANTOM Sentinel will now automatically send recovery emails."
+          : "Recovery emails require manual approval.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to update Auto-Pilot",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!merchant) return null;
+
+  const isEnabled = merchant.autoPilotEnabled;
+
+  return (
+    <div 
+      className={`flex items-center gap-3 px-4 py-2 rounded-md border transition-colors ${
+        isEnabled 
+          ? 'bg-emerald-950/50 border-emerald-500/30' 
+          : 'bg-slate-800/50 border-white/10'
+      }`}
+    >
+      <Zap className={`w-4 h-4 ${isEnabled ? 'text-emerald-400' : 'text-slate-500'}`} />
+      <span className={`text-sm font-medium ${isEnabled ? 'text-emerald-300' : 'text-slate-400'}`}>
+        {isEnabled ? 'Auto-Pilot ON' : 'Auto-Pilot OFF'}
+      </span>
+      <Switch
+        checked={isEnabled}
+        onCheckedChange={(checked) => toggleMutation.mutate(checked)}
+        disabled={toggleMutation.isPending}
+        data-testid="switch-auto-pilot"
+        className="data-[state=checked]:bg-emerald-500"
+      />
+    </div>
+  );
+}
+
 function MoneyHero() {
   const { merchant } = useMerchant();
 
@@ -143,12 +201,13 @@ function MoneyHero() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-semibold text-white">Revenue Intelligence</h1>
-        <p className="text-slate-500 text-sm">
-          Last audit: <span className="font-mono text-slate-400">{formatDate(merchant.lastAuditAt)}</span>
-        </p>
+        <AutoPilotToggle />
       </div>
+      <p className="text-slate-500 text-sm -mt-4">
+        Last audit: <span className="font-mono text-slate-400">{formatDate(merchant.lastAuditAt)}</span>
+      </p>
 
       <div className="h-[200px] flex flex-col items-center justify-center text-center space-y-4">
         <div>
