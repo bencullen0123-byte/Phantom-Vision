@@ -72,7 +72,8 @@ function getRecoveryEmailHtml(
   businessName: string, 
   amount: number, 
   invoiceUrl: string,
-  currency: string
+  currency: string,
+  brandColor: string = '#2563eb'
 ): string {
   const greeting = getGreeting(customerName);
   const formattedAmount = formatCurrency(amount, currency);
@@ -102,7 +103,7 @@ function getRecoveryEmailHtml(
               </p>
               <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                 <tr>
-                  <td style="border-radius: 6px; background-color: #2563eb;">
+                  <td style="border-radius: 6px; background-color: ${brandColor};">
                     <a href="${invoiceUrl}" target="_blank" style="display: inline-block; padding: 14px 28px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 6px;">
                       Update Payment Method
                     </a>
@@ -165,7 +166,8 @@ function getProtectionEmailHtml(
   portalUrl: string,
   currency: string,
   expMonth: number,
-  expYear: number
+  expYear: number,
+  brandColor: string = '#16a34a'
 ): string {
   const greeting = getGreeting(customerName);
   const formattedAmount = formatCurrency(amount, currency);
@@ -205,7 +207,7 @@ function getProtectionEmailHtml(
               </p>
               <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                 <tr>
-                  <td style="border-radius: 6px; background-color: #16a34a;">
+                  <td style="border-radius: 6px; background-color: ${brandColor};">
                     <a href="${portalUrl}" target="_blank" style="display: inline-block; padding: 14px 28px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 6px;">
                       Update Card Now
                     </a>
@@ -290,6 +292,7 @@ export async function sendPulseEmail(
 ): Promise<SendEmailResult> {
   const businessName = merchant.businessName || 'Your Service Provider';
   const currency = merchant.defaultCurrency || 'gbp';
+  const brandColor = merchant.brandColor || '#6366f1';
   const isProtection = target.status === 'impending';
   const emailType = isProtection ? 'Protection' : 'Recovery';
   
@@ -312,7 +315,8 @@ export async function sendPulseEmail(
       trackingUrl,
       currency,
       expMonth,
-      expYear
+      expYear,
+      brandColor
     );
     textContent = getProtectionEmailText(
       target.customerName,
@@ -330,7 +334,8 @@ export async function sendPulseEmail(
       businessName,
       target.amount,
       trackingUrl,
-      currency
+      currency,
+      brandColor
     );
     textContent = getRecoveryEmailText(
       target.customerName,
@@ -412,8 +417,9 @@ export async function sendRecoveryEmail(
 
   const businessName = merchant.businessName || 'Your Service Provider';
   const currency = merchant.defaultCurrency || 'gbp';
+  const brandColor = merchant.brandColor || '#6366f1';
   
-  const htmlContent = getRecoveryEmailHtml(customerName, businessName, amount, invoiceUrl, currency);
+  const htmlContent = getRecoveryEmailHtml(customerName, businessName, amount, invoiceUrl, currency, brandColor);
   const textContent = getRecoveryEmailText(customerName, businessName, amount, invoiceUrl, currency);
   const subject = `Action Required: Payment failed for ${businessName}`;
   

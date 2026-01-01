@@ -27,6 +27,10 @@ interface MerchantStats {
   lifetime: LifetimeStats;
   monthlyTrend: MonthlyTrendPoint[];
   dailyPulse: DailyPulsePoint[];
+  businessName: string | null;
+  supportEmail: string | null;
+  brandColor: string | null;
+  autoPilotEnabled: boolean;
 }
 
 interface AuthStatus {

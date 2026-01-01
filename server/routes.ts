@@ -400,6 +400,45 @@ export async function registerRoutes(
     }
   });
 
+  // Merchant Branding Update - PATCH endpoint for updating branding settings
+  app.patch("/api/merchant/branding", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const { businessName, supportEmail, brandColor, autoPilotEnabled } = req.body;
+      
+      const updateData: Record<string, any> = {};
+      if (businessName !== undefined) updateData.businessName = businessName;
+      if (supportEmail !== undefined) updateData.supportEmail = supportEmail;
+      if (brandColor !== undefined) updateData.brandColor = brandColor;
+      if (autoPilotEnabled !== undefined) updateData.autoPilotEnabled = autoPilotEnabled;
+
+      const updated = await storage.updateMerchantBranding(merchantId, updateData);
+      
+      if (!updated) {
+        return res.status(404).json({ status: "error", message: "Merchant not found" });
+      }
+
+      return res.json({
+        status: "success",
+        message: "Branding updated successfully",
+        merchant: {
+          businessName: updated.businessName,
+          supportEmail: updated.supportEmail,
+          brandColor: updated.brandColor,
+          autoPilotEnabled: updated.autoPilotEnabled,
+        }
+      });
+    } catch (error: any) {
+      console.error("[BRANDING] Failed to update branding:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to update branding",
+        error: error.message
+      });
+    }
+  });
+
   // Merchant Stats API - returns Historical Revenue Intelligence (secured by session)
   app.get("/api/merchant/stats", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
@@ -426,6 +465,10 @@ export async function registerRoutes(
         totalProtectedCents: historicalStats.totalProtectedCents,
         monthlyTrend: historicalStats.monthlyTrend,
         dailyPulse: historicalStats.dailyPulse,
+        businessName: merchant.businessName,
+        supportEmail: merchant.supportEmail,
+        brandColor: merchant.brandColor,
+        autoPilotEnabled: merchant.autoPilotEnabled,
       });
     } catch (error: any) {
       console.error("[STATS] Failed to get merchant stats:", error);

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, bigint, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -27,6 +27,9 @@ export const merchants = pgTable("merchants", {
   impendingLeakageCents: bigint("impending_leakage_cents", { mode: "number" }).default(0).notNull(),
   // Revenue saved by proactive outreach
   totalProtectedCents: bigint("total_protected_cents", { mode: "number" }).default(0).notNull(),
+  // Merchant Branding
+  brandColor: text("brand_color").default("#6366f1"),
+  autoPilotEnabled: boolean("auto_pilot_enabled").default(false).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({

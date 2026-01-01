@@ -151,6 +151,7 @@ export interface IStorage {
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
   updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
   updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined>;
+  updateMerchantBranding(id: string, data: { businessName?: string; supportEmail?: string; brandColor?: string; autoPilotEnabled?: boolean }): Promise<Merchant | undefined>;
   getHistoricalRevenueStats(merchantId: string): Promise<HistoricalRevenueStats>;
   getMonthlyTrend(merchantId: string): Promise<MonthlyTrendPoint[]>;
   getDailyPulse(merchantId: string): Promise<DailyPulsePoint[]>;
@@ -288,6 +289,25 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(merchants)
       .set({ impendingLeakageCents })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async updateMerchantBranding(id: string, data: { businessName?: string; supportEmail?: string; brandColor?: string; autoPilotEnabled?: boolean }): Promise<Merchant | undefined> {
+    const updatePayload: Record<string, any> = {};
+    if (data.businessName !== undefined) updatePayload.businessName = data.businessName;
+    if (data.supportEmail !== undefined) updatePayload.supportEmail = data.supportEmail;
+    if (data.brandColor !== undefined) updatePayload.brandColor = data.brandColor;
+    if (data.autoPilotEnabled !== undefined) updatePayload.autoPilotEnabled = data.autoPilotEnabled;
+
+    if (Object.keys(updatePayload).length === 0) {
+      return this.getMerchant(id);
+    }
+
+    const [updated] = await db
+      .update(merchants)
+      .set(updatePayload)
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
