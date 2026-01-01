@@ -579,6 +579,13 @@ export async function registerRoutes(
         declineType: ghost.declineType,
         failureCode: ghost.failureCode,
         failureMessage: ghost.failureMessage,
+        cardBrand: ghost.cardBrand,
+        cardFunding: ghost.cardFunding,
+        countryCode: ghost.countryCode,
+        stripeErrorCode: ghost.stripeErrorCode,
+        recoveryStrategy: ghost.recoveryStrategy,
+        clickCount: ghost.clickCount,
+        lastClickedAt: ghost.lastClickedAt,
       }));
 
       return res.json(response);

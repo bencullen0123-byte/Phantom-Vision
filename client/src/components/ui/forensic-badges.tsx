@@ -209,6 +209,85 @@ export function StatusBadge({ status, emailCount = 0 }: { status: GhostStatus; e
   );
 }
 
+export function CardDNABadge({ brand, funding }: { brand: string | null; funding: string | null }) {
+  const normalizedBrand = brand?.toLowerCase() || "unknown";
+  const Icon = cardBrandIcons[normalizedBrand] || CreditCard;
+
+  const brandColors: Record<string, string> = {
+    visa: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+    mastercard: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+    amex: "bg-sky-500/20 text-sky-300 border-sky-500/30",
+    discover: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  };
+
+  const colorClass = brandColors[normalizedBrand] || "bg-slate-500/20 text-slate-300 border-slate-500/30";
+  const fundingLabel = funding ? (funding.charAt(0).toUpperCase() + funding.slice(1)) : null;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <Badge variant="outline" className={`${colorClass} text-xs`}>
+        <Icon className="w-3 h-3 mr-1" />
+        {brand ? (brand.charAt(0).toUpperCase() + brand.slice(1)) : "Unknown"}
+      </Badge>
+      {fundingLabel && (
+        <Badge variant="outline" className="bg-slate-500/10 text-slate-400 border-slate-500/20 text-xs">
+          {fundingLabel}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+export function ErrorCodeBadge({ code }: { code: string | null }) {
+  if (!code) {
+    return (
+      <Badge variant="outline" className="bg-slate-500/10 text-slate-500 border-slate-500/20 text-xs">
+        <HelpCircle className="w-3 h-3 mr-1" />
+        Unknown
+      </Badge>
+    );
+  }
+
+  const hardDeclines = ["card_declined", "expired_card", "lost_card", "stolen_card", "fraudulent"];
+  const softDeclines = ["insufficient_funds", "processing_error", "try_again_later", "do_not_honor"];
+  const authRequired = ["authentication_required", "3ds_required"];
+
+  const normalizedCode = code.toLowerCase();
+
+  if (authRequired.some(c => normalizedCode.includes(c) || normalizedCode.includes("3ds"))) {
+    return (
+      <Badge variant="outline" className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-xs">
+        <Shield className="w-3 h-3 mr-1" />
+        {code}
+      </Badge>
+    );
+  }
+
+  if (hardDeclines.some(c => normalizedCode.includes(c))) {
+    return (
+      <Badge variant="outline" className="bg-red-500/20 text-red-300 border-red-500/30 text-xs">
+        <AlertTriangle className="w-3 h-3 mr-1" />
+        {code}
+      </Badge>
+    );
+  }
+
+  if (softDeclines.some(c => normalizedCode.includes(c))) {
+    return (
+      <Badge variant="outline" className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-xs">
+        <AlertTriangle className="w-3 h-3 mr-1" />
+        {code}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="outline" className="bg-slate-500/20 text-slate-300 border-slate-500/30 text-xs">
+      {code}
+    </Badge>
+  );
+}
+
 type AttributionType = "organic" | "pulse" | "phantom" | null;
 
 export function AttributionBadge({ type }: { type: AttributionType }) {

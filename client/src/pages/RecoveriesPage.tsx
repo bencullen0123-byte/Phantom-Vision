@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useMerchant } from "@/context/MerchantContext";
+import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Search, Ghost, ArrowUpDown } from "lucide-react";
+import { Loader2, Search, Ghost, ArrowUpDown, Copy, Check } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +17,12 @@ import {
 import { 
   StatusBadge, 
   StrategyBadge, 
-  AttributionBadge 
+  AttributionBadge,
+  CardDNABadge,
+  CountryBadge,
+  ErrorCodeBadge,
 } from "@/components/ui/forensic-badges";
+import { useToast } from "@/hooks/use-toast";
 
 interface GhostTarget {
   id: string;
@@ -35,21 +40,42 @@ interface GhostTarget {
   recoveryStrategy: string | null;
   clickCount: number;
   lastClickedAt: string | null;
+  cardBrand: string | null;
+  cardFunding: string | null;
+  countryCode: string | null;
+  stripeErrorCode: string | null;
 }
 
-function formatCurrency(cents: number): string {
+function formatCurrency(cents: number, currency: string = "gbp"): string {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
-    currency: "GBP",
+    currency: currency.toUpperCase(),
   }).format(cents / 100);
 }
 
-function formatDate(dateStr: string | null): string {
+function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return "-";
+  
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffMins < 60) {
+    return `${diffMins}m ago`;
+  }
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  }
+  
   return new Date(dateStr).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
-    year: "numeric",
   });
 }
 
@@ -72,6 +98,34 @@ function getLastAction(ghost: GhostTarget): { label: string; date: string; color
     return { label: "Emailed", date: formatShortDate(ghost.lastEmailedAt), color: "text-blue-400" };
   }
   return { label: "Discovered", date: formatShortDate(ghost.discoveredAt), color: "text-slate-500" };
+}
+
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(true);
+      toast({ title: "Email copied", description: email });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: "Failed to copy", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 text-slate-500 hover:text-slate-300"
+      onClick={handleCopy}
+      data-testid="button-copy-email"
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+    </Button>
+  );
 }
 
 function GhostLedgerSkeleton() {
@@ -99,6 +153,8 @@ function GhostLedgerSkeleton() {
 function GhostLedger() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
+  const { stats } = useMerchantStats();
+  const currency = stats?.defaultCurrency || "gbp";
 
   const ghostsQuery = useQuery<GhostTarget[]>({
     queryKey: ["/api/merchant/ghosts"],
@@ -167,14 +223,15 @@ function GhostLedger() {
         </span>
       </div>
 
-      <div className="bg-slate-900/50 border border-white/5 rounded-md overflow-hidden">
+      <div className="bg-slate-900/50 border border-white/5 rounded-md overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="border-white/5 hover:bg-transparent">
               <TableHead className="text-slate-400">Customer</TableHead>
-              <TableHead className="text-slate-400">Email</TableHead>
               <TableHead className="text-slate-400">Amount</TableHead>
-              <TableHead className="text-slate-400">Invoice</TableHead>
+              <TableHead className="text-slate-400">Payment DNA</TableHead>
+              <TableHead className="text-slate-400">Origin</TableHead>
+              <TableHead className="text-slate-400">Root Cause</TableHead>
               <TableHead className="text-slate-400">
                 <Button
                   variant="ghost"
@@ -183,7 +240,7 @@ function GhostLedger() {
                   onClick={() => setSortAsc(!sortAsc)}
                   data-testid="button-sort-date"
                 >
-                  Discovered
+                  Detected
                   <ArrowUpDown className="ml-1 w-3 h-3" />
                 </Button>
               </TableHead>
@@ -200,22 +257,32 @@ function GhostLedger() {
                 className="border-white/5 hover:bg-white/[0.02]"
                 data-testid={`row-ghost-${ghost.id}`}
               >
-                <TableCell className="text-slate-200">{ghost.customerName}</TableCell>
-                <TableCell className="text-slate-400 text-sm">{ghost.email}</TableCell>
-                <TableCell 
-                  className={ghost.status === "recovered" ? "text-emerald-500" : "text-slate-400"}
-                  style={{ fontFamily: "JetBrains Mono, monospace" }}
-                >
-                  {formatCurrency(ghost.amount)}
+                <TableCell>
+                  <div className="flex flex-col">
+                    <span className="text-slate-200 text-sm">{ghost.customerName}</span>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-slate-500 text-xs truncate max-w-[180px]">{ghost.email}</span>
+                      <CopyEmailButton email={ghost.email} />
+                    </div>
+                  </div>
                 </TableCell>
                 <TableCell 
-                  className="text-slate-500 text-xs"
+                  className={ghost.status === "recovered" ? "text-emerald-500" : "text-slate-300"}
                   style={{ fontFamily: "JetBrains Mono, monospace" }}
                 >
-                  {ghost.invoiceId.slice(0, 20)}...
+                  {formatCurrency(ghost.amount, currency)}
                 </TableCell>
-                <TableCell className="text-slate-500 text-sm">
-                  {formatDate(ghost.discoveredAt)}
+                <TableCell>
+                  <CardDNABadge brand={ghost.cardBrand} funding={ghost.cardFunding} />
+                </TableCell>
+                <TableCell>
+                  <CountryBadge countryCode={ghost.countryCode} />
+                </TableCell>
+                <TableCell>
+                  <ErrorCodeBadge code={ghost.stripeErrorCode} />
+                </TableCell>
+                <TableCell className="text-slate-400 text-sm" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                  {formatRelativeTime(ghost.discoveredAt)}
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={ghost.status as "pending" | "nudged" | "recovered" | "protected" | "exhausted"} emailCount={ghost.emailCount} />
@@ -247,6 +314,8 @@ function GhostLedger() {
 
 export default function RecoveriesPage() {
   const { merchant, isLoading, isAuthenticated, authLoading } = useMerchant();
+  const { stats } = useMerchantStats();
+  const currency = stats?.defaultCurrency || "gbp";
 
   if (authLoading || isLoading) {
     return <GhostLedgerSkeleton />;
@@ -268,7 +337,7 @@ export default function RecoveriesPage() {
   const formatCurrencyHero = (cents: number) => {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
-      currency: "GBP",
+      currency: currency.toUpperCase(),
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(cents / 100);
