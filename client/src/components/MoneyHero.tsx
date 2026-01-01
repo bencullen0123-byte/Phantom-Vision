@@ -2,7 +2,8 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, RefreshCw, TrendingDown, TrendingUp, Zap, Activity } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2, RefreshCw, TrendingDown, Zap, Shield, Info } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +26,7 @@ function RefreshAuditButton() {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ghosts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/system/logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/diagnostic-pulse"] });
       refetch();
     },
     onError: (error: Error) => {
@@ -132,128 +134,83 @@ export default function MoneyHero() {
     }).format(cents / 100);
   };
 
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Never";
-    return new Date(dateStr).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   const lifetime = stats?.lifetime || { allTimeLeakedCents: 0, totalRecoveredCents: 0, totalGhostCount: 0 };
   const grossInvoiced = stats?.grossInvoicedCents || 0;
+  const shadowLeakage = lifetime.allTimeLeakedCents;
   
-  const netLeakage = lifetime.allTimeLeakedCents - lifetime.totalRecoveredCents;
-  const leakageRate = grossInvoiced > 0 ? (netLeakage / grossInvoiced) * 100 : 0;
-  
-  const getHealthStatus = (rate: number) => {
-    if (rate < 5) return { label: "Healthy", color: "text-emerald-400", bg: "bg-emerald-500/20", border: "border-emerald-500/30" };
-    if (rate <= 10) return { label: "Warning", color: "text-amber-400", bg: "bg-amber-500/20", border: "border-amber-500/30" };
-    return { label: "Critical", color: "text-red-400", bg: "bg-red-500/20", border: "border-red-500/30" };
-  };
-  
-  const healthStatus = getHealthStatus(leakageRate);
+  const leakageRate = grossInvoiced > 0 ? (shadowLeakage / grossInvoiced) * 100 : 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h1 className="text-2xl font-semibold text-white">Revenue Intelligence</h1>
+    <div className="h-full flex flex-col">
+      <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
         <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-md bg-indigo-500/20 flex items-center justify-center">
+            <Shield className="w-6 h-6 text-indigo-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-slate-400">Total Volume Guarded</h2>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="w-3.5 h-3.5 text-slate-500 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs bg-slate-900 border-white/10">
+                  <p className="text-xs text-slate-300">
+                    This represents the total value of all recurring invoices PHANTOM is actively monitoring for failure.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <p 
+              className="text-3xl font-bold text-white"
+              style={{ fontFamily: "JetBrains Mono, monospace" }}
+              data-testid="text-volume-guarded"
+            >
+              {statsLoading ? "..." : formatCurrency(grossInvoiced)}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           <RefreshAuditButton />
           <AutoPilotToggle />
         </div>
       </div>
-      <p className="text-slate-500 text-sm -mt-4">
-        Last audit: <span className="font-mono text-slate-400">{formatDate(stats?.lastAuditAt || merchant.lastAuditAt)}</span>
-      </p>
 
-      <div className="h-[200px] flex flex-col items-center justify-center text-center space-y-4">
-        <div>
-          <p className="text-slate-500 text-sm mb-2 flex items-center justify-center gap-2">
-            <TrendingDown className="w-4 h-4" />
-            Money Left on the Table
-          </p>
-          <p 
-            className="text-5xl md:text-6xl lg:text-7xl text-slate-400"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-leaked-hero"
-          >
-            {statsLoading ? "..." : formatCurrency(netLeakage)}
-          </p>
-        </div>
-
-        <div className="pt-4">
-          <p className="text-slate-500 text-sm mb-2 flex items-center justify-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            Recovered by PHANTOM
-          </p>
-          <p 
-            className="text-3xl md:text-4xl text-emerald-500"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-recovered-hero"
-          >
-            {statsLoading ? "..." : formatCurrency(lifetime.totalRecoveredCents)}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-center gap-6 text-sm border-t border-white/5 pt-6 flex-wrap">
-        <div 
-          className={`flex items-center gap-2 px-4 py-2 rounded-md border ${healthStatus.bg} ${healthStatus.border}`}
-          data-testid="badge-leakage-rate"
-        >
-          <Activity className={`w-4 h-4 ${healthStatus.color}`} />
-          <div className="text-left">
-            <p className="text-slate-400 text-xs">Leakage Rate</p>
-            <p className={`text-lg font-semibold ${healthStatus.color}`} style={{ fontFamily: "JetBrains Mono, monospace" }}>
-              {statsLoading ? "..." : `${leakageRate.toFixed(1)}%`}
+      <div className="flex-1 flex items-center">
+        <div className="w-full grid grid-cols-2 gap-6">
+          <div className="flex flex-col items-center justify-center p-4 rounded-md bg-red-950/30 border border-red-500/20">
+            <p className="text-slate-500 text-xs mb-1 flex items-center gap-1.5">
+              <TrendingDown className="w-3.5 h-3.5 text-red-400" />
+              Shadow Leakage
+            </p>
+            <p 
+              className="text-2xl font-bold text-red-400"
+              style={{ fontFamily: "JetBrains Mono, monospace" }}
+              data-testid="text-shadow-leakage"
+            >
+              {statsLoading ? "..." : formatCurrency(shadowLeakage)}
+            </p>
+            <p className="text-xs text-slate-600 mt-1">
+              {leakageRate.toFixed(1)}% of guarded volume
             </p>
           </div>
-          <span className={`text-xs px-2 py-0.5 rounded ${healthStatus.bg} ${healthStatus.color}`}>
-            {healthStatus.label}
-          </span>
-        </div>
 
-        <div className="text-center">
-          <p className="text-slate-500 text-xs">Total Invoiced Volume</p>
-          <p 
-            className="text-lg text-white"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-gross-invoiced"
-          >
-            {statsLoading ? "..." : formatCurrency(grossInvoiced)}
-          </p>
-        </div>
-
-        <div className="text-center">
-          <p className="text-slate-500 text-xs">Ghost Users</p>
-          <p 
-            className="text-lg text-white"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-ghost-count"
-          >
-            {statsLoading ? "..." : lifetime.totalGhostCount}
-          </p>
-        </div>
-
-        <div className="text-center">
-          <p className="text-slate-500 text-xs">Tier Limit</p>
-          <p 
-            className="text-lg text-white"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-          >
-            {stats?.tierLimit || merchant.tierLimit}
-          </p>
-        </div>
-
-        <div className="text-center">
-          <p className="text-slate-500 text-xs">Strategy</p>
-          <p className="text-lg text-white capitalize">
-            {stats?.recoveryStrategy || merchant.recoveryStrategy}
-          </p>
+          <div className="flex flex-col items-center justify-center p-4 rounded-md bg-emerald-950/30 border border-emerald-500/20">
+            <p className="text-slate-500 text-xs mb-1 flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              Recovered
+            </p>
+            <p 
+              className="text-2xl font-bold text-emerald-400"
+              style={{ fontFamily: "JetBrains Mono, monospace" }}
+              data-testid="text-recovered-hero"
+            >
+              {statsLoading ? "..." : formatCurrency(lifetime.totalRecoveredCents)}
+            </p>
+            <p className="text-xs text-slate-600 mt-1">
+              {lifetime.totalGhostCount} ghosts detected
+            </p>
+          </div>
         </div>
       </div>
     </div>
