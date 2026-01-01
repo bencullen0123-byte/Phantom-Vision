@@ -31,43 +31,105 @@ interface BrandingFormData {
   autoPilotEnabled: boolean;
 }
 
-function BrandPreview({ businessName, brandColor }: { businessName: string; brandColor: string }) {
+interface BlueprintCanvasProps {
+  businessName: string;
+  brandColor: string;
+  supportEmail: string;
+}
+
+function BlueprintCanvas({ businessName, brandColor, supportEmail }: BlueprintCanvasProps) {
+  const displayName = businessName || 'Your Business Name';
+  const displayEmail = supportEmail || 'support@yourbusiness.com';
+  
   return (
     <Card className="bg-slate-900/50 border-white/5">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-slate-300">Brand Preview</CardTitle>
+        <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+          <Mail className="w-4 h-4 text-purple-400" />
+          Live Recovery Blueprint
+        </CardTitle>
+        <p className="text-xs text-slate-500 mt-1">Technical Bridge Strategy Preview</p>
       </CardHeader>
       <CardContent>
-        <div className="rounded-md border border-white/10 overflow-hidden">
-          <div 
-            className="py-4 px-6 text-center"
-            style={{ backgroundColor: brandColor }}
-          >
-            <h3 className="text-white font-semibold text-lg" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
-              {businessName || 'Your Business Name'}
-            </h3>
-          </div>
-          <div className="bg-white p-4 space-y-3">
-            <p className="text-sm text-gray-600">
-              Hi <span className="font-medium text-gray-900">Customer Name</span>,
-            </p>
-            <p className="text-sm text-gray-600">
-              It looks like the latest payment of <span className="font-medium text-gray-900">£50.00</span> for{' '}
-              <span className="font-medium text-gray-900">{businessName || 'Your Business'}</span> didn't go through.
-            </p>
-            <div className="pt-2">
-              <button 
-                className="px-4 py-2 rounded-md text-white text-sm font-medium"
+        <div className="relative mx-auto" style={{ maxWidth: '320px' }}>
+          <div className="bg-slate-800 rounded-3xl p-2 border-2 border-slate-700 shadow-xl">
+            <div className="bg-slate-700 rounded-full w-20 h-1.5 mx-auto mb-2" />
+            
+            <div className="rounded-2xl overflow-hidden border border-slate-600">
+              <div className="bg-slate-100 px-3 py-2 border-b border-slate-300">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-500 w-12">From:</span>
+                    <span className="text-slate-700 font-medium truncate">{displayName}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-500 w-12">Reply-To:</span>
+                    <span className="text-purple-600 font-medium truncate">{displayEmail}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-500 w-12">Subject:</span>
+                    <span className="text-slate-800 font-semibold truncate">Quick fix needed for your payment</span>
+                  </div>
+                </div>
+              </div>
+
+              <div 
+                className="py-3 px-4 text-center"
                 style={{ backgroundColor: brandColor }}
               >
-                Update Payment Method
-              </button>
+                <h3 className="text-white font-semibold text-sm" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
+                  {displayName}
+                </h3>
+              </div>
+
+              <div className="bg-white p-4 space-y-3">
+                <p className="text-xs text-gray-600">
+                  Hi <span className="font-medium text-gray-900">Alex</span>,
+                </p>
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  We've detected a <span className="font-medium text-purple-700">technical friction point</span> with 
+                  your recent payment for <span className="font-medium text-gray-900">{displayName}</span>.
+                </p>
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  This often happens when your bank requires additional verification. 
+                  A quick confirmation should resolve this in seconds.
+                </p>
+                <div className="pt-2">
+                  <button 
+                    className="w-full px-4 py-2.5 rounded-md text-white text-xs font-medium shadow-sm"
+                    style={{ backgroundColor: brandColor }}
+                  >
+                    Complete Verification
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 text-center pt-1">
+                  Secure payment powered by Stripe
+                </p>
+              </div>
+
+              <div className="bg-gray-100 py-2 px-4 text-center border-t border-gray-200">
+                <p className="text-xs text-gray-500">
+                  Need help? Reply to this email.
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {displayName}
+                </p>
+              </div>
             </div>
+
+            <div className="bg-slate-700 rounded-full w-10 h-10 mx-auto mt-2 border-2 border-slate-600" />
           </div>
-          <div className="bg-gray-100 py-3 px-4 text-center">
-            <p className="text-xs text-gray-500">
-              This email was sent by {businessName || 'Your Business Name'}
-            </p>
+        </div>
+
+        <div className="mt-4 p-3 rounded-md bg-purple-500/10 border border-purple-500/20">
+          <div className="flex items-start gap-2">
+            <Shield className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-xs font-medium text-purple-300">Technical Bridge Tone</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Emphasizes "technical friction" rather than "payment failure" to reduce customer anxiety and increase resolution rates.
+              </p>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -414,9 +476,10 @@ function MerchantProfileForm() {
         </CardContent>
       </Card>
 
-      <BrandPreview 
+      <BlueprintCanvas 
         businessName={formData.businessName} 
-        brandColor={formData.brandColor} 
+        brandColor={formData.brandColor}
+        supportEmail={formData.supportEmail}
       />
     </div>
   );
