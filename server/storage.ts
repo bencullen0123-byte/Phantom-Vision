@@ -758,6 +758,8 @@ export class DatabaseStorage implements IStorage {
     message: string;
     amount: number | null;
     isDirect?: boolean;
+    customerName?: string;
+    status?: string;
   }[]> {
     const ghosts = await this.getGhostTargetsByMerchant(merchantId);
     
@@ -768,6 +770,8 @@ export class DatabaseStorage implements IStorage {
       message: string;
       amount: number | null;
       isDirect?: boolean;
+      customerName?: string;
+      status?: string;
     }[] = [];
 
     for (const ghost of ghosts) {
@@ -776,8 +780,10 @@ export class DatabaseStorage implements IStorage {
         id: `${ghost.id}-discovery`,
         timestamp: ghost.discoveredAt,
         type: "discovery",
-        message: `Deep Harvest identified uncollected revenue from invoice ${ghost.invoiceId.slice(0, 12)}...`,
+        message: `Uncollected revenue detected from ${ghost.customerName || 'Unknown Customer'}`,
         amount: ghost.amount,
+        customerName: ghost.customerName,
+        status: ghost.status,
       });
 
       // Email action events

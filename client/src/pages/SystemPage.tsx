@@ -16,6 +16,8 @@ interface IntelligenceLog {
   message: string;
   amount: number | null;
   isDirect?: boolean;
+  customerName?: string;
+  status?: string;
 }
 
 interface MerchantStats {
@@ -400,10 +402,30 @@ function IntelligenceLogFeed({ stats }: { stats?: MerchantStats }) {
                 <span className="text-[10px] text-slate-600">
                   {formatTimestamp(log.timestamp)}
                 </span>
-                {log.amount && (
-                  <span className={`text-xs ${log.type === "success" ? "text-emerald-500" : "text-slate-400"}`}>
-                    {formatCurrency(log.amount)}
+                {log.customerName && (
+                  <span className="text-xs text-slate-300 font-medium" data-testid={`customer-name-${log.id}`}>
+                    {log.customerName}
                   </span>
+                )}
+                {log.amount && log.amount > 0 && (
+                  <span className={`text-xs ${log.type === "success" ? "text-emerald-500" : "text-slate-400"}`}>
+                    {formatCurrency(log.amount, stats?.defaultCurrency || "usd")}
+                  </span>
+                )}
+                {log.status && log.type === "discovery" && (
+                  <Badge 
+                    variant="outline" 
+                    className={`h-5 text-[10px] ${
+                      log.status === "pending" 
+                        ? "border-amber-500/50 text-amber-400 bg-amber-500/10" 
+                        : log.status === "impending"
+                        ? "border-sky-500/50 text-sky-400 bg-sky-500/10"
+                        : "border-slate-500/50 text-slate-400 bg-slate-500/10"
+                    }`}
+                    data-testid={`badge-status-${log.id}`}
+                  >
+                    {log.status === "pending" ? "Pending" : log.status === "impending" ? "Impending" : log.status}
+                  </Badge>
                 )}
                 {log.isDirect && (
                   <>
