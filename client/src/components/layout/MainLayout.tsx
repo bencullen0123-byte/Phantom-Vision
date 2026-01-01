@@ -61,7 +61,7 @@ function formatRelativeTime(dateStr: string | null): string {
   return `${diffDays}d ago`;
 }
 
-function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }) {
+function SidebarNavItem({ item, isActive, showIndicator }: { item: NavItem; isActive: boolean; showIndicator?: boolean }) {
   const { state } = useSidebar();
   const Icon = item.icon;
   const isCollapsed = state === "collapsed";
@@ -73,10 +73,18 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
       className={isActive ? "bg-white/10 text-white" : "text-slate-400"}
     >
       <Link href={item.path}>
-        <Icon className="w-4 h-4 shrink-0" />
+        <div className="relative">
+          <Icon className="w-4 h-4 shrink-0" />
+          {showIndicator && (
+            <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full" />
+          )}
+        </div>
         <span className={`transition-opacity duration-150 ${isCollapsed ? "opacity-0 w-0" : "opacity-100"}`}>
           {item.label}
         </span>
+        {showIndicator && !isCollapsed && (
+          <span className="ml-auto text-xs text-emerald-400">ON</span>
+        )}
       </Link>
     </SidebarMenuButton>
   );
@@ -90,6 +98,9 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
             <div>
               <p className="font-medium text-white">{item.label}</p>
               <p className="text-xs text-slate-400">{item.description}</p>
+              {showIndicator && (
+                <p className="text-xs text-emerald-400 mt-1">Auto-Pilot ON</p>
+              )}
             </div>
           </TooltipContent>
         </Tooltip>
@@ -103,8 +114,9 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
 function AppSidebar() {
   const [location] = useLocation();
   const { state } = useSidebar();
-  const { isAuthenticated } = useMerchant();
+  const { isAuthenticated, merchant } = useMerchant();
   const isCollapsed = state === "collapsed";
+  const autoPilotEnabled = merchant?.autoPilotEnabled ?? false;
 
   const handleLogout = async () => {
     try {
@@ -142,6 +154,7 @@ function AppSidebar() {
                   key={item.path}
                   item={item}
                   isActive={location === item.path}
+                  showIndicator={item.path === "/settings" && autoPilotEnabled}
                 />
               ))}
             </SidebarMenu>
