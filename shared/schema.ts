@@ -32,6 +32,8 @@ export const merchants = pgTable("merchants", {
   autoPilotEnabled: boolean("auto_pilot_enabled").default(false).notNull(),
   // Gross Ecosystem Volume: Total invoiced (paid + unpaid) from last scan
   grossInvoicedCents: bigint("gross_invoiced_cents", { mode: "number" }).default(0).notNull(),
+  // Async Audit Status: tracks background scan state
+  lastAuditStatus: text("last_audit_status").default("idle").notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({

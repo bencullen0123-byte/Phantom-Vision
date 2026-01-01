@@ -280,7 +280,8 @@ export async function registerRoutes(
     }
   });
 
-  // Audit endpoint - runs ghost scan for a merchant (secured by session)
+  // Audit endpoint - runs ghost scan for a merchant asynchronously (secured by session)
+  // Returns 202 Accepted immediately, processes in background
   app.post("/api/audit/run", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
     const forceSync = req.body?.forceSync === true;
@@ -293,35 +294,45 @@ export async function registerRoutes(
       });
     }
 
-    console.log(`[AUDIT] Running audit for merchant: ${merchant.id} (forceSync: ${forceSync})`);
-
-    try {
-      const result = await runAuditForMerchant(merchant.id, forceSync);
-      
-      if (result.errors.length > 0) {
-        console.error("[AUDIT] Errors during scan:", result.errors);
-      }
-
-      // Pure Ledger: Return live stats from database instead of scan result
-      const liveStats = await storage.getHistoricalRevenueStats(merchant.id);
-
-      return res.json({
-        status: "success",
-        merchant_id: merchant.stripeUserId,
-        total_ghosts_found: liveStats.lifetime.totalGhostCount,
-        total_revenue_at_risk: liveStats.lifetime.allTimeLeakedCents - liveStats.lifetime.totalRecoveredCents,
-        total_revenue_at_risk_formatted: `$${((liveStats.lifetime.allTimeLeakedCents - liveStats.lifetime.totalRecoveredCents) / 100).toFixed(2)}`,
-        oracle_data_points: result.oracle_data_points,
-        errors: result.errors
-      });
-    } catch (error: any) {
-      console.error("[AUDIT] Scan failed:", error);
-      return res.status(500).json({
-        status: "error",
-        message: "Audit scan failed",
-        error: error.message
+    // Check if audit is already in progress
+    if (merchant.lastAuditStatus === 'in_progress') {
+      return res.status(409).json({
+        status: "in_progress",
+        message: "Audit already in progress"
       });
     }
+
+    console.log(`[AUDIT] Initiating async audit for merchant: ${merchant.id} (forceSync: ${forceSync})`);
+
+    // Set status to in_progress immediately
+    await storage.updateMerchantAuditStatus(merchantId, 'in_progress');
+
+    // Fire off the audit asynchronously - do not await
+    setImmediate(async () => {
+      try {
+        console.log(`[AUDIT-BG] Background scan starting for merchant: ${merchantId}`);
+        const result = await runAuditForMerchant(merchantId, forceSync);
+        
+        if (result.errors.length > 0) {
+          console.error("[AUDIT-BG] Errors during scan:", result.errors);
+        }
+
+        // Mark as completed
+        await storage.updateMerchantAuditStatus(merchantId, 'completed');
+        console.log(`[AUDIT-BG] Background scan completed for merchant: ${merchantId}`);
+      } catch (error: any) {
+        console.error("[AUDIT-BG] Background scan failed:", error);
+        // Mark as failed - don't leave stuck in 'in_progress'
+        await storage.updateMerchantAuditStatus(merchantId, 'failed');
+      }
+    });
+
+    // Return 202 Accepted immediately
+    return res.status(202).json({
+      status: "accepted",
+      message: "Audit initiated in background",
+      forceSync
+    });
   });
 
   // Pulse endpoint - triggers recovery email queue processing
