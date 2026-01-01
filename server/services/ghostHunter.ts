@@ -230,11 +230,12 @@ async function extractMLMetadata(
       }
 
       // Extract card details from payment method
+      // NORMALIZE: Lowercase for consistent ML training data
       const pm = paymentIntent.payment_method;
       if (pm && typeof pm !== 'string' && pm.card) {
-        result.cardBrand = pm.card.brand || null;
-        result.cardFunding = pm.card.funding || null;
-        result.countryCode = pm.card.country || null;
+        result.cardBrand = pm.card.brand?.toLowerCase() || null;
+        result.cardFunding = pm.card.funding?.toLowerCase() || null;
+        result.countryCode = pm.card.country?.toLowerCase() || null;
       }
 
       // Extract error code from payment intent if not already set
@@ -248,10 +249,11 @@ async function extractMLMetadata(
   }
 
   // Try to get country from customer if not set
+  // NORMALIZE: Lowercase for consistent ML training data
   if (!result.countryCode && invoice.customer && typeof invoice.customer !== 'string') {
     const customer = invoice.customer as Stripe.Customer;
     if (customer.address?.country) {
-      result.countryCode = customer.address.country;
+      result.countryCode = customer.address.country.toLowerCase();
     }
   }
 

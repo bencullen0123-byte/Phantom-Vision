@@ -513,6 +513,13 @@ export class DatabaseStorage implements IStorage {
           declineType: encryptedPayload.declineType,
           failureCode: encryptedPayload.failureCode,
           failureMessage: encryptedPayload.failureMessage,
+          // Universal Revenue Intelligence: ML metadata (enriched on re-scan)
+          cardBrand: encryptedPayload.cardBrand,
+          cardFunding: encryptedPayload.cardFunding,
+          countryCode: encryptedPayload.countryCode,
+          requires3ds: encryptedPayload.requires3ds,
+          stripeErrorCode: encryptedPayload.stripeErrorCode,
+          originalInvoiceDate: encryptedPayload.originalInvoiceDate,
         },
       })
       .returning();
