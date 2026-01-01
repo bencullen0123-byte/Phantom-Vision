@@ -13,6 +13,7 @@ export interface MerchantStats {
   defaultCurrency: string;
   impendingLeakageCents: number;
   totalProtectedCents: number;
+  grossInvoicedCents: number;
   monthlyTrend: { month: string; leaked: number; recovered: number }[];
   dailyPulse: { date: string; leaked: number; recovered: number }[];
 }

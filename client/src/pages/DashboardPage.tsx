@@ -2,7 +2,7 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, RefreshCw, Search, Shield, TrendingDown, TrendingUp, Zap } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Search, Shield, TrendingDown, TrendingUp, Zap, Activity } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -255,6 +255,18 @@ function MoneyHero() {
   };
 
   const lifetime = stats?.lifetime || { allTimeLeakedCents: 0, totalRecoveredCents: 0, totalGhostCount: 0 };
+  const grossInvoiced = stats?.grossInvoicedCents || 0;
+  
+  const netLeakage = lifetime.allTimeLeakedCents - lifetime.totalRecoveredCents;
+  const leakageRate = grossInvoiced > 0 ? (netLeakage / grossInvoiced) * 100 : 0;
+  
+  const getHealthStatus = (rate: number) => {
+    if (rate < 5) return { label: "Healthy", color: "text-emerald-400", bg: "bg-emerald-500/20", border: "border-emerald-500/30" };
+    if (rate <= 10) return { label: "Warning", color: "text-amber-400", bg: "bg-amber-500/20", border: "border-amber-500/30" };
+    return { label: "Critical", color: "text-red-400", bg: "bg-red-500/20", border: "border-red-500/30" };
+  };
+  
+  const healthStatus = getHealthStatus(leakageRate);
 
   return (
     <div className="space-y-6">
@@ -280,7 +292,7 @@ function MoneyHero() {
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-leaked-hero"
           >
-            {statsLoading ? "..." : formatCurrency(lifetime.allTimeLeakedCents - lifetime.totalRecoveredCents)}
+            {statsLoading ? "..." : formatCurrency(netLeakage)}
           </p>
         </div>
 
@@ -299,29 +311,58 @@ function MoneyHero() {
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-8 text-sm border-t border-white/5 pt-6">
+      <div className="flex items-center justify-center gap-6 text-sm border-t border-white/5 pt-6 flex-wrap">
+        <div 
+          className={`flex items-center gap-2 px-4 py-2 rounded-md border ${healthStatus.bg} ${healthStatus.border}`}
+          data-testid="badge-leakage-rate"
+        >
+          <Activity className={`w-4 h-4 ${healthStatus.color}`} />
+          <div className="text-left">
+            <p className="text-slate-400 text-xs">Leakage Rate</p>
+            <p className={`text-lg font-semibold ${healthStatus.color}`} style={{ fontFamily: "JetBrains Mono, monospace" }}>
+              {statsLoading ? "..." : `${leakageRate.toFixed(1)}%`}
+            </p>
+          </div>
+          <span className={`text-xs px-2 py-0.5 rounded ${healthStatus.bg} ${healthStatus.color}`}>
+            {healthStatus.label}
+          </span>
+        </div>
+
         <div className="text-center">
-          <p className="text-slate-500">Ghost Users</p>
+          <p className="text-slate-500 text-xs">Total Invoiced Volume</p>
           <p 
-            className="text-xl text-white"
+            className="text-lg text-white"
+            style={{ fontFamily: "JetBrains Mono, monospace" }}
+            data-testid="text-gross-invoiced"
+          >
+            {statsLoading ? "..." : formatCurrency(grossInvoiced)}
+          </p>
+        </div>
+
+        <div className="text-center">
+          <p className="text-slate-500 text-xs">Ghost Users</p>
+          <p 
+            className="text-lg text-white"
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-ghost-count"
           >
             {statsLoading ? "..." : lifetime.totalGhostCount}
           </p>
         </div>
+
         <div className="text-center">
-          <p className="text-slate-500">Tier Limit</p>
+          <p className="text-slate-500 text-xs">Tier Limit</p>
           <p 
-            className="text-xl text-white"
+            className="text-lg text-white"
             style={{ fontFamily: "JetBrains Mono, monospace" }}
           >
             {stats?.tierLimit || merchant.tierLimit}
           </p>
         </div>
+
         <div className="text-center">
-          <p className="text-slate-500">Strategy</p>
-          <p className="text-xl text-white capitalize">
+          <p className="text-slate-500 text-xs">Strategy</p>
+          <p className="text-lg text-white capitalize">
             {stats?.recoveryStrategy || merchant.recoveryStrategy}
           </p>
         </div>
