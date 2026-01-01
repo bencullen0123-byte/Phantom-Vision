@@ -67,16 +67,79 @@ function getGreeting(customerName: string): string {
   return "there";
 }
 
+// Strategy-specific subject lines and messaging (Sprint 3.1)
+interface StrategyContent {
+  subject: string;
+  headline: string;
+  body: string;
+  ctaText: string;
+  ctaColor: string;
+}
+
+function getStrategyContent(
+  strategy: string | null,
+  businessName: string,
+  formattedAmount: string
+): StrategyContent {
+  switch (strategy) {
+    case 'technical_bridge':
+      // 3DS authentication issues - friendly technical explanation
+      return {
+        subject: `Action needed: Complete authentication for ${businessName}`,
+        headline: `Quick security check needed`,
+        body: `Your recent payment of <strong style="color: #18181b;">${formattedAmount}</strong> for <strong style="color: #18181b;">${businessName}</strong> requires additional authentication to complete. This is a standard security step used by your bank to protect your account.`,
+        ctaText: `Complete Authentication`,
+        ctaColor: '#7c3aed' // Purple for technical
+      };
+    
+    case 'card_refresh':
+      // Card issues (expired, declined) - direct card update request
+      return {
+        subject: `Update your card for ${businessName}`,
+        headline: `Your payment method needs updating`,
+        body: `The card on file for your <strong style="color: #18181b;">${businessName}</strong> subscription couldn't be charged (<strong style="color: #18181b;">${formattedAmount}</strong>). This often happens with expired or replaced cards. Please update your payment method to keep your access active.`,
+        ctaText: `Update Card Now`,
+        ctaColor: '#ea580c' // Orange for card issues
+      };
+    
+    case 'high_value_manual':
+      // High-value invoices - VIP treatment
+      return {
+        subject: `Important: Payment issue for your ${businessName} account`,
+        headline: `We noticed an issue with your payment`,
+        body: `A payment of <strong style="color: #18181b;">${formattedAmount}</strong> for your <strong style="color: #18181b;">${businessName}</strong> account didn't go through. As a valued customer, we wanted to reach out personally. Please use the link below to resolve this at your convenience.`,
+        ctaText: `View Invoice`,
+        ctaColor: '#d97706' // Amber for VIP
+      };
+    
+    case 'smart_retry':
+    default:
+      // Soft declines - gentle nudge, likely temporary issue
+      return {
+        subject: `Action Required: Payment failed for ${businessName}`,
+        headline: `Hi there,`,
+        body: `It looks like the latest payment of <strong style="color: #18181b;">${formattedAmount}</strong> for <strong style="color: #18181b;">${businessName}</strong> didn't go through. This is often a temporary issue. Please try again using the button below.`,
+        ctaText: `Retry Payment`,
+        ctaColor: '#2563eb' // Blue for retry
+      };
+  }
+}
+
 function getRecoveryEmailHtml(
   customerName: string, 
   businessName: string, 
   amount: number, 
   invoiceUrl: string,
   currency: string,
-  brandColor: string = '#2563eb'
+  brandColor: string = '#2563eb',
+  strategy: string | null = null
 ): string {
   const greeting = getGreeting(customerName);
   const formattedAmount = formatCurrency(amount, currency);
+  const content = getStrategyContent(strategy, businessName, formattedAmount);
+  
+  // Use strategy-specific color if default, otherwise use merchant's brand color
+  const ctaColor = brandColor === '#6366f1' ? content.ctaColor : brandColor;
   
   return `<!DOCTYPE html>
 <html>
@@ -93,19 +156,19 @@ function getRecoveryEmailHtml(
           <tr>
             <td style="padding: 40px 40px 30px;">
               <h1 style="margin: 0 0 20px; font-size: 24px; font-weight: 600; color: #18181b;">
-                Hi ${greeting},
+                ${content.headline.includes('Hi') ? content.headline : `Hi ${greeting},`}
               </h1>
               <p style="margin: 0 0 20px; font-size: 16px; color: #3f3f46;">
-                It looks like the latest payment of <strong style="color: #18181b;">${formattedAmount}</strong> for <strong style="color: #18181b;">${businessName}</strong> didn't go through.
+                ${content.body}
               </p>
               <p style="margin: 0 0 30px; font-size: 16px; color: #3f3f46;">
-                To keep your access active, please update your payment method using the button below.
+                Click below to resolve this quickly:
               </p>
               <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                 <tr>
-                  <td style="border-radius: 6px; background-color: ${brandColor};">
+                  <td style="border-radius: 6px; background-color: ${ctaColor};">
                     <a href="${invoiceUrl}" target="_blank" style="display: inline-block; padding: 14px 28px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 6px;">
-                      Update Payment Method
+                      ${content.ctaText}
                     </a>
                   </td>
                 </tr>
@@ -141,17 +204,21 @@ function getRecoveryEmailText(
   businessName: string, 
   amount: number, 
   invoiceUrl: string,
-  currency: string
+  currency: string,
+  strategy: string | null = null
 ): string {
   const greeting = getGreeting(customerName);
   const formattedAmount = formatCurrency(amount, currency);
+  const content = getStrategyContent(strategy, businessName, formattedAmount);
+  
+  // Strip HTML tags from body for text version
+  const textBody = content.body.replace(/<[^>]+>/g, '');
   
   return `Hi ${greeting},
 
-It looks like the latest payment of ${formattedAmount} for ${businessName} didn't go through.
+${textBody}
 
-To keep your access active, please update your payment method here:
-${invoiceUrl}
+${content.ctaText}: ${invoiceUrl}
 
 If you've already resolved this, please disregard this message.
 
@@ -328,21 +395,26 @@ export async function sendPulseEmail(
       expYear
     );
   } else {
-    subject = `Action Required: Payment failed for ${businessName}`;
+    // Use strategy-specific content (Sprint 3.1 Golden Hour)
+    const formattedAmount = formatCurrency(target.amount, currency);
+    const strategyContent = getStrategyContent(target.recoveryStrategy || null, businessName, formattedAmount);
+    subject = strategyContent.subject;
     htmlContent = getRecoveryEmailHtml(
       target.customerName,
       businessName,
       target.amount,
       trackingUrl,
       currency,
-      brandColor
+      brandColor,
+      target.recoveryStrategy || null
     );
     textContent = getRecoveryEmailText(
       target.customerName,
       businessName,
       target.amount,
       trackingUrl,
-      currency
+      currency,
+      target.recoveryStrategy || null
     );
   }
   
@@ -472,6 +544,95 @@ export async function sendRecoveryEmail(
 
   } catch (error: any) {
     console.error(`[PULSE MAILER] Failed to send email:`, error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Sprint 3.1: Golden Hour Email Trigger
+// Sends strategy-specific recovery email immediately after ghost creation
+// Guardrails: Only sends if emailCount === 0 and status === 'pending'
+export async function sendGoldenHourEmail(
+  targetId: string,
+  storage: any // Avoid circular import - passed from caller
+): Promise<SendEmailResult> {
+  console.log(`[GOLDEN HOUR] Evaluating target ${targetId} for immediate email`);
+  
+  try {
+    // Fetch target with guardrail checks
+    const target = await storage.getGhostTarget(targetId);
+    
+    if (!target) {
+      console.log(`[GOLDEN HOUR] Target ${targetId} not found - skipping`);
+      return { success: false, error: 'Target not found' };
+    }
+    
+    // Guardrail 1: Only send first email
+    if (target.emailCount > 0) {
+      console.log(`[GOLDEN HOUR] Target ${targetId} already emailed (count: ${target.emailCount}) - skipping`);
+      return { success: false, error: 'Already emailed' };
+    }
+    
+    // Guardrail 2: Only send to pending status (not recovered, protected, or exhausted)
+    if (target.status !== 'pending') {
+      console.log(`[GOLDEN HOUR] Target ${targetId} not pending (status: ${target.status}) - skipping`);
+      return { success: false, error: `Invalid status: ${target.status}` };
+    }
+    
+    // Fetch merchant for branding
+    const merchant = await storage.getMerchant(target.merchantId);
+    if (!merchant) {
+      console.log(`[GOLDEN HOUR] Merchant not found for target ${targetId} - skipping`);
+      return { success: false, error: 'Merchant not found' };
+    }
+    
+    // Check if Auto-Pilot is enabled
+    if (!merchant.autoPilotEnabled) {
+      console.log(`[GOLDEN HOUR] Auto-Pilot disabled for merchant ${merchant.id} - queued for manual review`);
+      return { success: false, error: 'Auto-Pilot disabled' };
+    }
+    
+    // Build tracking URL
+    const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : process.env.REPL_SLUG && process.env.REPL_OWNER
+        ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
+        : 'http://localhost:5000';
+    const trackingUrl = `${baseUrl}/api/l/${target.id}`;
+    
+    // Send strategy-specific email
+    console.log(`[GOLDEN HOUR] Sending ${target.recoveryStrategy || 'smart_retry'} email to ${target.email.replace(/(.{3}).*@/, '$1...@')}`);
+    
+    const result = await sendPulseEmail(target, merchant, trackingUrl);
+    
+    if (result.success) {
+      // Update email status (increment count, set timestamp)
+      await storage.updateGhostEmailStatus(target.id);
+      
+      console.log(`[GOLDEN HOUR] Email sent successfully for target ${targetId} (${result.dryRun ? 'DRY RUN' : 'LIVE'})`);
+      
+      // Log to system for Intelligence Feed
+      await storage.createSystemLog({
+        jobName: 'golden_hour_email',
+        status: 'success',
+        details: JSON.stringify({
+          type: 'golden_hour_trigger',
+          targetId: target.id,
+          strategy: target.recoveryStrategy || 'smart_retry',
+          amount: target.amount,
+          dryRun: result.dryRun || false,
+          timestamp: new Date().toISOString()
+        }),
+        errorMessage: null
+      });
+    }
+    
+    return result;
+    
+  } catch (error: any) {
+    console.error(`[GOLDEN HOUR] Error processing target ${targetId}:`, error.message);
     return {
       success: false,
       error: error.message

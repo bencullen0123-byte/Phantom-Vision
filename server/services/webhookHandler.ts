@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { storage } from "../storage";
 import { decrypt } from "../utils/crypto";
 import { determineRecoveryStrategy } from "./ghostHunter";
+import { sendGoldenHourEmail } from "./pulseMailer";
 
 interface WebhookResult {
   success: boolean;
@@ -231,6 +232,9 @@ export async function handleInvoicePaymentFailed(
 
   console.log(`[WEBHOOK] Ghost ${existingGhost ? 'updated' : 'created'} for invoice ${invoice.id}`);
 
+  // Get the upserted ghost for triggering Golden Hour email
+  const upsertedGhost = await storage.getGhostByInvoiceId(invoice.id);
+
   // Update merchant ledger if this is a new invoice
   if (!existingGhost) {
     // Increment gross invoiced cents (new invoice discovered)
@@ -240,6 +244,16 @@ export async function handleInvoicePaymentFailed(
     // Increment all-time leaked cents
     await storage.incrementMerchantLeakedCents(merchant.id, amount);
     console.log(`[WEBHOOK] Incremented allTimeLeakedCents by ${amount} for merchant ${merchant.id}`);
+    
+    // Sprint 3.1: Trigger Golden Hour email for new ghosts
+    // Guardrails are checked inside sendGoldenHourEmail (emailCount === 0, status === pending)
+    if (upsertedGhost) {
+      console.log(`[WEBHOOK] Triggering Golden Hour email for new ghost ${upsertedGhost.id}`);
+      // Fire-and-forget to avoid blocking webhook response
+      sendGoldenHourEmail(upsertedGhost.id, storage).catch((err: any) => {
+        console.error(`[WEBHOOK] Golden Hour email failed:`, err.message);
+      });
+    }
   }
 
   // Update lastAuditAt to trigger UI refresh
