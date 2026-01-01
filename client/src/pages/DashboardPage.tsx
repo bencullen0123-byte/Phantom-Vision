@@ -1,7 +1,8 @@
 import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Shield } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -131,12 +132,124 @@ function DeepHarvestGate() {
   );
 }
 
+function ConversionFunnel({ funnel, recoveryRate }: { 
+  funnel?: { totalGhosts: number; nudgedCount: number; clickedCount: number; recoveredCount: number };
+  recoveryRate?: number;
+}) {
+  const steps = [
+    { 
+      label: "Ghosts Detected", 
+      value: funnel?.totalGhosts || 0, 
+      icon: Ghost, 
+      color: "text-slate-400",
+      bg: "bg-slate-500/20"
+    },
+    { 
+      label: "Nudges Sent", 
+      value: funnel?.nudgedCount || 0, 
+      icon: Mail, 
+      color: "text-blue-400",
+      bg: "bg-blue-500/20"
+    },
+    { 
+      label: "Link Clicks", 
+      value: funnel?.clickedCount || 0, 
+      icon: MousePointer, 
+      color: "text-amber-400",
+      bg: "bg-amber-500/20"
+    },
+    { 
+      label: "Recovered", 
+      value: funnel?.recoveredCount || 0, 
+      icon: CheckCircle, 
+      color: "text-emerald-400",
+      bg: "bg-emerald-500/20"
+    },
+  ];
+
+  return (
+    <Card className="bg-slate-900/50 border-white/5 p-6">
+      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+        <h3 className="text-lg font-semibold text-white">Recovery Funnel</h3>
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-emerald-400" />
+          <span className="text-sm text-slate-400">
+            Conversion: <span className="text-emerald-400 font-semibold">{(recoveryRate || 0).toFixed(1)}%</span>
+          </span>
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between gap-2">
+        {steps.map((step, index) => (
+          <div key={step.label} className="flex items-center flex-1">
+            <div className="flex flex-col items-center text-center flex-1">
+              <div className={`w-12 h-12 rounded-full ${step.bg} flex items-center justify-center mb-2`}>
+                <step.icon className={`w-5 h-5 ${step.color}`} />
+              </div>
+              <span className="text-2xl font-bold text-white" data-testid={`text-funnel-${step.label.toLowerCase().replace(' ', '-')}`}>
+                {step.value.toLocaleString()}
+              </span>
+              <span className="text-xs text-slate-500 mt-1">{step.label}</span>
+            </div>
+            {index < steps.length - 1 && (
+              <div className="w-8 h-px bg-white/10 flex-shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function RevenueSavedCard({ amount, currency }: { amount: number; currency: string }) {
+  const formatCurrency = (cents: number) => {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: currency?.toUpperCase() || "GBP",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(cents / 100);
+  };
+
+  return (
+    <Card className="bg-emerald-950/40 border-emerald-500/30 p-6 relative overflow-visible">
+      <div className="absolute -top-3 -right-3 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl" />
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+          <TrendingUp className="w-5 h-5 text-emerald-400" />
+        </div>
+        <span className="text-sm font-medium text-emerald-300">Revenue Saved</span>
+      </div>
+      <p 
+        className="text-3xl font-bold text-emerald-400"
+        style={{ fontFamily: "JetBrains Mono, monospace" }}
+        data-testid="text-revenue-saved"
+      >
+        {formatCurrency(amount)}
+      </p>
+      <p className="text-xs text-emerald-500/70 mt-2">
+        Recovered through PHANTOM outreach
+      </p>
+    </Card>
+  );
+}
+
 function DashboardMetrics() {
   const { stats, isLoading } = useMerchantStats();
+  
+  const totalRecoveredCents = stats?.lifetime?.totalRecoveredCents || 0;
+  const totalProtectedCents = stats?.totalProtectedCents || 0;
+  const revenueSaved = totalRecoveredCents + totalProtectedCents;
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-1">
+          <RevenueSavedCard 
+            amount={revenueSaved} 
+            currency={stats?.defaultCurrency || 'gbp'} 
+          />
+        </div>
         <div className="lg:col-span-2">
           <MoneyHero />
         </div>
@@ -144,6 +257,12 @@ function DashboardMetrics() {
           <LeakageDonut data={stats?.leakageDistribution} />
         </div>
       </div>
+      
+      <ConversionFunnel 
+        funnel={stats?.funnel} 
+        recoveryRate={stats?.recoveryRate} 
+      />
+      
       <ForensicCharts />
     </div>
   );

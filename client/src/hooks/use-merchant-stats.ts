@@ -32,6 +32,14 @@ export interface MerchantStats {
   monthlyTrend: { month: string; leaked: number; recovered: number }[];
   dailyPulse: { date: string; leaked: number; recovered: number }[];
   leakageDistribution?: LeakageDistribution;
+  // Sprint 3.2: Conversion Funnel Metrics
+  funnel?: {
+    totalGhosts: number;
+    nudgedCount: number;
+    clickedCount: number;
+    recoveredCount: number;
+  };
+  recoveryRate?: number;
 }
 
 export function useMerchantStats() {

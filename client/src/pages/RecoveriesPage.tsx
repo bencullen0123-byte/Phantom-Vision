@@ -29,6 +29,8 @@ interface GhostTarget {
   recoveryType: string | null;
   declineType: string | null;
   recoveryStrategy: string | null;
+  clickCount: number;
+  lastClickedAt: string | null;
 }
 
 function getStatusBadge(status: string, emailCount: number) {
@@ -87,6 +89,27 @@ function formatDate(dateStr: string | null): string {
     month: "short",
     year: "numeric",
   });
+}
+
+function formatShortDate(dateStr: string | null): string {
+  if (!dateStr) return "";
+  return new Date(dateStr).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function getLastAction(ghost: GhostTarget): { label: string; date: string; color: string } {
+  if (ghost.status === "recovered" && ghost.recoveredAt) {
+    return { label: "Recovered", date: formatShortDate(ghost.recoveredAt), color: "text-emerald-400" };
+  }
+  if (ghost.lastClickedAt) {
+    return { label: "Clicked", date: formatShortDate(ghost.lastClickedAt), color: "text-amber-400" };
+  }
+  if (ghost.lastEmailedAt) {
+    return { label: "Emailed", date: formatShortDate(ghost.lastEmailedAt), color: "text-blue-400" };
+  }
+  return { label: "Discovered", date: formatShortDate(ghost.discoveredAt), color: "text-slate-500" };
 }
 
 function GhostLedgerSkeleton() {
@@ -204,6 +227,7 @@ function GhostLedger() {
               </TableHead>
               <TableHead className="text-slate-400">Status</TableHead>
               <TableHead className="text-slate-400">Strategy</TableHead>
+              <TableHead className="text-slate-400">Last Action</TableHead>
               <TableHead className="text-slate-400">Attribution</TableHead>
             </TableRow>
           </TableHeader>
@@ -236,6 +260,16 @@ function GhostLedger() {
                 </TableCell>
                 <TableCell>
                   {getRecoveryStrategyBadge(ghost.recoveryStrategy)}
+                </TableCell>
+                <TableCell className="text-sm">
+                  {(() => {
+                    const action = getLastAction(ghost);
+                    return (
+                      <span className={action.color}>
+                        {action.label} {action.date && <span className="text-slate-600">{action.date}</span>}
+                      </span>
+                    );
+                  })()}
                 </TableCell>
                 <TableCell>
                   {getAttributionBadge(ghost.recoveryType)}
