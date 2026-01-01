@@ -162,28 +162,11 @@ async function createGhostScenario(
       invoiceAmount = invoices.data[0].amount_due || amount;
     }
   } catch (stripeErr: any) {
-    console.log(`[SEEDER] Ghost #${index} Stripe failed (${stripeErr.message}), using mock IDs`);
+    console.log(`[SEEDER] Ghost #${index} Stripe failed (${stripeErr.message})`);
   }
   
-  // GUARANTEED PERSISTENCE: Always inject to ledger regardless of Stripe status
-  const purgeAt = new Date();
-  purgeAt.setDate(purgeAt.getDate() + 90);
-  
-  await storage.upsertGhostTarget({
-    merchantId,
-    email,
-    customerName,
-    amount: invoiceAmount,
-    invoiceId,
-    purgeAt,
-    discoveredAt,
-    status: "pending",
-    stripeCustomerId: customerId,
-    failureReason: "card_declined",
-    declineType: "hard",
-  });
-  
-  console.log(`[SEEDER] Ghost #${index} injected: ${invoiceId}, ${currency.toUpperCase()} ${invoiceAmount/100}`);
+  // STRIPE PARITY: Do NOT inject to ledger - let Ghost Hunter discover from Stripe
+  console.log(`[SEEDER] Ghost #${index} Stripe scenario created: ${customerId}, ${currency.toUpperCase()} ${amount/100}`);
 }
 
 async function createRiskScenario(
@@ -233,26 +216,11 @@ async function createRiskScenario(
     });
     subscriptionId = subscription.id;
   } catch (stripeErr: any) {
-    console.log(`[SEEDER] Risk #${index} Stripe failed (${stripeErr.message}), using mock IDs`);
+    console.log(`[SEEDER] Risk #${index} Stripe failed (${stripeErr.message})`);
   }
   
-  // GUARANTEED PERSISTENCE: Always inject to ledger regardless of Stripe status
-  const purgeAt = new Date();
-  purgeAt.setDate(purgeAt.getDate() + 90);
-  
-  await storage.upsertGhostTarget({
-    merchantId,
-    email,
-    customerName,
-    amount,
-    invoiceId: `impending_${subscriptionId}`,
-    purgeAt,
-    discoveredAt,
-    status: "impending",
-    stripeCustomerId: customerId,
-  });
-  
-  console.log(`[SEEDER] Risk #${index} injected: ${subscriptionId}, ${currency.toUpperCase()} ${amount/100}`);
+  // STRIPE PARITY: Do NOT inject to ledger - let Ghost Hunter discover from Stripe
+  console.log(`[SEEDER] Risk #${index} Stripe scenario created: ${customerId}, ${currency.toUpperCase()} ${amount/100}`);
 }
 
 async function createSuccessScenario(
