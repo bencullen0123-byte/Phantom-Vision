@@ -68,6 +68,15 @@ Preferred communication style: Simple, everyday language.
   - ML metadata extraction with lowercase normalization for real-time forensic capture
   - Atomic ledger updates: grossInvoicedCents, allTimeLeakedCents, lastAuditAt
   - Intelligent decline branching: soft vs hard decline categorization for recovery strategy
+- **Recovery Strategy Selector** (Sprint 2.3):
+  - `recoveryStrategy` field on ghost_targets: 'technical_bridge' | 'smart_retry' | 'card_refresh' | 'high_value_manual'
+  - `determineRecoveryStrategy()` function in ghostHunter.ts with priority logic:
+    1. 3DS authentication issues (requires3ds=true or authentication_required) → technical_bridge
+    2. High-value invoices (>$500 / 50000 cents) → high_value_manual
+    3. Hard declines (insufficient_funds, do_not_honor, etc.) → card_refresh
+    4. Soft declines (generic_decline, processing_error, etc.) → smart_retry
+  - Integrated into both batch Ghost Hunter scans and real-time webhook handlers
+  - UI display with color-coded badges: Purple (3DS Bridge), Blue (Smart Retry), Orange (Card Refresh), Amber (VIP Manual)
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
