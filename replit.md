@@ -62,6 +62,12 @@ Preferred communication style: Simple, everyday language.
   - Detects 3DS requirement from `requires_action` status or `authentication_required` error
   - All string values normalized to lowercase for consistent ML training
   - Fields updated on both INSERT (new ghosts) and UPDATE (re-scanned ghosts)
+- **Real-Time Sentinel Webhooks** (Sprint 2.2):
+  - `invoice.payment_failed` handler creates ghosts instantly instead of waiting for batch scans
+  - Merchant lookup via connected account ID from Stripe Connect
+  - ML metadata extraction with lowercase normalization for real-time forensic capture
+  - Atomic ledger updates: grossInvoicedCents, allTimeLeakedCents, lastAuditAt
+  - Intelligent decline branching: soft vs hard decline categorization for recovery strategy
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
