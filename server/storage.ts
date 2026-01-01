@@ -75,6 +75,7 @@ export interface ShadowRevenueUpdate {
   totalGhostCount: number;
   lastAuditAt: Date;
   defaultCurrency?: string;
+  grossInvoicedCents?: number;
 }
 
 // TITANIUM: Decryption error placeholder - prevents system-wide crash on key mismatch
@@ -318,6 +319,11 @@ export class DatabaseStorage implements IStorage {
       updatePayload.defaultCurrency = data.defaultCurrency;
     }
     
+    // Include gross invoiced if provided from scan
+    if (data.grossInvoicedCents !== undefined) {
+      updatePayload.grossInvoicedCents = data.grossInvoicedCents;
+    }
+    
     const [updated] = await db
       .update(merchants)
       .set(updatePayload)
@@ -401,10 +407,10 @@ export class DatabaseStorage implements IStorage {
     const monthlyTrend = await this.getMonthlyTrend(merchantId);
     const dailyPulse = await this.getDailyPulse(merchantId);
     
-    // Pure Ledger Model: Live aggregate from ghost_targets (no stale merchant columns)
+    // Pure Ledger Model: Live aggregate from ghost_targets for leakage metrics
     // All-Time Leaked: Every ghost ever discovered
     // Active Leakage (Money on Table): All ghosts except recovered
-    // Gross Invoiced: Total ecosystem volume (ALL rows including paid, pending, impending)
+    // Gross Invoiced: Read from merchant (set by Ghost Hunter from ALL Stripe invoices)
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(*)::bigint AS total_count,
@@ -412,8 +418,7 @@ export class DatabaseStorage implements IStorage {
         COALESCE(SUM(CASE WHEN status != 'recovered' THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
         COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered,
         COALESCE(SUM(CASE WHEN status = 'impending' THEN amount ELSE 0 END), 0)::bigint AS impending_leakage,
-        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected,
-        COALESCE(SUM(amount), 0)::bigint AS gross_ecosystem_volume
+        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected
       FROM ghost_targets
       WHERE merchant_id = ${merchantId}
     `);
@@ -431,7 +436,7 @@ export class DatabaseStorage implements IStorage {
       totalProtectedCents: Number(row?.total_protected || 0),
       monthlyTrend,
       dailyPulse,
-      grossInvoicedCents: Number(row?.gross_ecosystem_volume || 0),
+      grossInvoicedCents: Number(merchant?.grossInvoicedCents || 0),
     };
   }
 

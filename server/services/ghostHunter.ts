@@ -85,6 +85,7 @@ interface ScanResult {
   ghostsFound: GhostResult[];
   oracleDataPoints: number;
   totalRevenueAtRisk: number;
+  grossInvoicedCents: number;
   errors: string[];
 }
 
@@ -372,6 +373,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     ghostsFound: [],
     oracleDataPoints: 0,
     totalRevenueAtRisk: 0,
+    grossInvoicedCents: 0,
     errors: [],
   };
 
@@ -494,6 +496,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
           await delay(THROTTLE_DELAY_MS);
           logTelemetryHeartbeat(telemetry);
         }
+
+        // GROSS INVOICED: Accumulate total invoiced (paid + unpaid) for leakage rate calculation
+        result.grossInvoicedCents += invoice.amount_due || 0;
 
         // HAMMER DIRECTIVE: Relaxed Status Firewall
         // Include incomplete and draft statuses to capture test scenarios and real-world failed initial payments
@@ -679,14 +684,15 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     }
   }
 
-  // Update lastAuditAt and defaultCurrency (live totals calculated from ghost_targets)
+  // Update lastAuditAt, defaultCurrency, and grossInvoicedCents (leakage calculated from ghost_targets)
   if (scanCompletedSuccessfully) {
     try {
       await storage.updateMerchant(merchantId, {
         lastAuditAt: new Date(),
         defaultCurrency: detectedCurrency,
+        grossInvoicedCents: result.grossInvoicedCents,
       });
-      console.log(`[GHOST HUNTER] Audit timestamp updated, currency: ${detectedCurrency?.toUpperCase() || 'GBP'}`);
+      console.log(`[GHOST HUNTER] Audit timestamp updated, currency: ${detectedCurrency?.toUpperCase() || 'GBP'}, grossInvoiced: $${(result.grossInvoicedCents / 100).toFixed(2)}`);
     } catch (error: any) {
       result.errors.push(`Failed to update merchant: ${error.message}`);
       console.error(`[GHOST HUNTER] Merchant update error:`, error);

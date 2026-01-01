@@ -30,6 +30,8 @@ export const merchants = pgTable("merchants", {
   // Merchant Branding
   brandColor: text("brand_color").default("#6366f1"),
   autoPilotEnabled: boolean("auto_pilot_enabled").default(false).notNull(),
+  // Gross Ecosystem Volume: Total invoiced (paid + unpaid) from last scan
+  grossInvoicedCents: bigint("gross_invoiced_cents", { mode: "number" }).default(0).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
