@@ -86,6 +86,12 @@ Preferred communication style: Simple, everyday language.
     - Default (smart_retry, high_value_manual, pending) → Hosted invoice
   - Graceful error handling: invalid/expired targets redirect to merchant supportEmail or generic Stripe help
   - Cookie logic: `phantom_attribution` cookie (HTTPOnly, SameSite=Lax, 24h expiry) for attribution window
+- **Recovery Payload & Link Verification** (Sprint 2.5.2):
+  - Enhanced redirect logic fetching real `hosted_invoice_url` from Stripe Invoice API
+  - Customer Portal sessions with `return_url` to `/payment-received` success page
+  - Redirect verification logging with strategy and destinationType to system_logs
+  - Data integrity checks: recovered/protected ghosts redirect to success page instead of payment links
+  - `/payment-received` confirmation page for successful Customer Portal returns
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
