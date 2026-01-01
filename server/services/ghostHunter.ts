@@ -448,12 +448,21 @@ async function scanForImpendingRisks(
 }
 
 export async function scanMerchant(merchantId: string, forceSync: boolean = false): Promise<ScanResult & { telemetry?: TelemetryState }> {
+  // DELTA SYNC: Pre-fetch merchant to get lastAuditAt anchor and cumulative grossInvoicedCents
+  const merchantPreFetch = await storage.getMerchant(merchantId);
+  const lastAuditAt = merchantPreFetch?.lastAuditAt;
+  const existingGrossInvoicedCents = merchantPreFetch?.grossInvoicedCents || 0;
+  
+  // Determine if this is a delta sync or full scan
+  const isDeltaSync = !forceSync && lastAuditAt !== null && lastAuditAt !== undefined;
+  
   const result: ScanResult & { telemetry?: TelemetryState } = {
     merchantId,
     ghostsFound: [],
     oracleDataPoints: 0,
     totalRevenueAtRisk: 0,
-    grossInvoicedCents: 0,
+    // CUMULATIVE: Start with existing grossInvoicedCents for delta syncs, 0 for full scans
+    grossInvoicedCents: isDeltaSync ? existingGrossInvoicedCents : 0,
     errors: [],
   };
 
@@ -472,10 +481,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     impendingCount: 0,
   };
 
-  console.log(`[GHOST HUNTER] Starting DEEP HARVEST scan for merchant: ${merchantId}`);
+  // DELTA SYNC LOGGING
+  const scanMode = isDeltaSync ? 'DELTA SYNC' : 'FULL SCAN';
+  const anchorInfo = isDeltaSync ? ` (since ${lastAuditAt?.toISOString()})` : '';
+  console.log(`[GHOST HUNTER] Starting ${scanMode} for merchant: ${merchantId}${anchorInfo}`);
   console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
   console.log(`[PHANTOM-CORE] DIAGNOSTIC SHELL ACTIVE`);
-  console.log(`[PHANTOM-CORE] Throttle: ${THROTTLE_DELAY_MS}ms every ${THROTTLE_BATCH_SIZE} records`);
+  console.log(`[PHANTOM-CORE] Mode: ${scanMode} | Throttle: ${THROTTLE_DELAY_MS}ms every ${THROTTLE_BATCH_SIZE} records`);
   console.log(`[PHANTOM-CORE] Rate Limit Retry: ${RATE_LIMIT_RETRY_MS}ms`);
   console.log(`[PHANTOM-CORE] ═══════════════════════════════════════════════════`);
 
@@ -544,12 +556,18 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     batchNumber++;
     
     try {
-      // Fetch ALL invoices - no status filter, no time filter
-      // This ensures we see every invoice including open, paid, draft, void, uncollectible
+      // DELTA SYNC: When lastAuditAt exists and not forceSync, only fetch invoices created after anchor
+      // FULL SCAN: Fetch ALL invoices when forceSync=true or no anchor exists
       const params: Stripe.InvoiceListParams = {
         limit: 100, // Maximum allowed by Stripe API
         expand: ['data.customer'], // Pre-expand customer for faster lookups
       };
+      
+      // Apply delta filter: only fetch invoices created after last successful audit
+      if (isDeltaSync && lastAuditAt) {
+        params.created = { gt: Math.floor(lastAuditAt.getTime() / 1000) };
+      }
+      
       if (startingAfter) {
         params.starting_after = startingAfter;
       }
