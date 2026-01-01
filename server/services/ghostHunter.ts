@@ -178,6 +178,86 @@ async function extractFailureFromPaymentIntent(
   }
 }
 
+// Universal Revenue Intelligence: Extract ML metadata from Stripe invoice
+interface MLMetadata {
+  cardBrand: string | null;
+  cardFunding: string | null;
+  countryCode: string | null;
+  requires3ds: boolean | null;
+  stripeErrorCode: string | null;
+  originalInvoiceDate: Date | null;
+}
+
+async function extractMLMetadata(
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+  paymentIntentId: string | null
+): Promise<MLMetadata> {
+  const result: MLMetadata = {
+    cardBrand: null,
+    cardFunding: null,
+    countryCode: null,
+    requires3ds: null,
+    stripeErrorCode: null,
+    originalInvoiceDate: null,
+  };
+
+  // Original invoice date (temporal anchor for recovery velocity)
+  if (invoice.created) {
+    result.originalInvoiceDate = new Date(invoice.created * 1000);
+  }
+
+  // Extract error code from last_payment_error
+  const lastError = (invoice as any).last_payment_error;
+  if (lastError) {
+    result.stripeErrorCode = lastError.decline_code || lastError.code || null;
+  }
+
+  // Try to get card info from payment intent
+  if (paymentIntentId) {
+    try {
+      const paymentIntent = await withRetry(() =>
+        stripe.paymentIntents.retrieve(paymentIntentId, {
+          expand: ['payment_method'],
+        })
+      );
+
+      // Check for 3DS requirement
+      if (paymentIntent.last_payment_error?.code === 'authentication_required') {
+        result.requires3ds = true;
+      } else if (paymentIntent.status === 'requires_action') {
+        result.requires3ds = true;
+      }
+
+      // Extract card details from payment method
+      const pm = paymentIntent.payment_method;
+      if (pm && typeof pm !== 'string' && pm.card) {
+        result.cardBrand = pm.card.brand || null;
+        result.cardFunding = pm.card.funding || null;
+        result.countryCode = pm.card.country || null;
+      }
+
+      // Extract error code from payment intent if not already set
+      if (!result.stripeErrorCode && paymentIntent.last_payment_error) {
+        result.stripeErrorCode = paymentIntent.last_payment_error.decline_code || 
+                                 paymentIntent.last_payment_error.code || null;
+      }
+    } catch (error: any) {
+      // Silent fail - ML metadata is optional
+    }
+  }
+
+  // Try to get country from customer if not set
+  if (!result.countryCode && invoice.customer && typeof invoice.customer !== 'string') {
+    const customer = invoice.customer as Stripe.Customer;
+    if (customer.address?.country) {
+      result.countryCode = customer.address.country;
+    }
+  }
+
+  return result;
+}
+
 async function getDecryptedToken(merchant: Merchant): Promise<string> {
   return decrypt(merchant.encryptedToken, merchant.iv, merchant.tag);
 }
@@ -550,6 +630,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 : invoiceAny.payment_intent?.id || null;
               const { failureCode, failureMessage } = await extractFailureFromPaymentIntent(stripe, paymentIntentId);
 
+              // Universal Revenue Intelligence: Extract ML metadata for cross-merchant learning
+              const mlMetadata = await extractMLMetadata(stripe, invoice, paymentIntentId);
+
               const purgeAt = new Date();
               purgeAt.setDate(purgeAt.getDate() + 90);
 
@@ -567,6 +650,13 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 declineType,
                 failureCode,
                 failureMessage,
+                // ML metadata (non-PII, queryable for revenue intelligence)
+                cardBrand: mlMetadata.cardBrand,
+                cardFunding: mlMetadata.cardFunding,
+                countryCode: mlMetadata.countryCode,
+                requires3ds: mlMetadata.requires3ds,
+                stripeErrorCode: mlMetadata.stripeErrorCode,
+                originalInvoiceDate: mlMetadata.originalInvoiceDate,
               });
               const upsertMs = Date.now() - upsertStart;
               telemetry.totalUpsertMs += upsertMs;
