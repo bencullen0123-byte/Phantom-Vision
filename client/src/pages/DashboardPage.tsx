@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import MoneyHero from "@/components/MoneyHero";
 import ForensicCharts from "@/components/ForensicCharts";
 import LeakageDonut from "@/components/charts/LeakageDonut";
+import DiagnosticTrident from "@/components/DiagnosticTrident";
 import { useState, useEffect } from "react";
 
 interface DiagnosticPulse {
@@ -464,23 +465,10 @@ function DashboardMetrics() {
   const revenueSaved = totalRecoveredCents + totalProtectedCents;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <CommandHeader />
       
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
-          <RevenueSavedCard 
-            amount={revenueSaved} 
-            currency={stats?.defaultCurrency || 'gbp'} 
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <MoneyHero />
-        </div>
-        <div className="lg:col-span-1">
-          <LeakageDonut data={stats?.leakageDistribution} />
-        </div>
-      </div>
+      <DiagnosticTrident />
       
       <ConversionFunnel 
         funnel={stats?.funnel} 
