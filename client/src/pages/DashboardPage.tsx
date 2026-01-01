@@ -47,15 +47,29 @@ function DeepHarvestGate() {
   const auditMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
-      return res.json();
+      return { data: await res.json(), status: res.status };
     },
-    onSuccess: (data) => {
-      toast({
-        title: "Deep Harvest Complete",
-        description: `Found ${data.total_ghosts_found} ghost users with ${data.total_revenue_at_risk_formatted} at risk.`,
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
-      refetch();
+    onSuccess: ({ data, status }) => {
+      if (status === 202) {
+        toast({
+          title: "Deep Harvest Initiated",
+          description: "Scanning in background. Results will appear shortly.",
+        });
+        // Poll for completion by refetching stats
+        const pollInterval = setInterval(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+          refetch();
+        }, 3000);
+        // Stop polling after 2 minutes max
+        setTimeout(() => clearInterval(pollInterval), 120000);
+      } else {
+        toast({
+          title: "Deep Harvest Complete",
+          description: `Found ${data.total_ghosts_found} ghost users with ${data.total_revenue_at_risk_formatted} at risk.`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+        refetch();
+      }
     },
     onError: (error: Error) => {
       toast({
