@@ -77,6 +77,15 @@ Preferred communication style: Simple, everyday language.
     4. Soft declines (generic_decline, processing_error, etc.) → smart_retry
   - Integrated into both batch Ghost Hunter scans and real-time webhook handlers
   - UI display with color-coded badges: Purple (3DS Bridge), Blue (Smart Retry), Orange (Card Refresh), Amber (VIP Manual)
+- **Attribution & Redirect Audit** (Sprint 2.5.1):
+  - Added `clickCount` and `lastClickedAt` fields to ghost_targets for per-target click analytics
+  - `recordGhostClick()` storage method atomically increments click count and timestamps
+  - Hardened `/api/l/:targetId` route with strategy-based routing:
+    - `technical_bridge` → Stripe hosted invoice for 3DS authentication
+    - `card_refresh` or `impending` → Customer Portal for card update
+    - Default (smart_retry, high_value_manual, pending) → Hosted invoice
+  - Graceful error handling: invalid/expired targets redirect to merchant supportEmail or generic Stripe help
+  - Cookie logic: `phantom_attribution` cookie (HTTPOnly, SameSite=Lax, 24h expiry) for attribution window
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan

@@ -748,14 +748,14 @@ export async function registerRoutes(
 
       if (ghost.recoveryStrategy === "card_refresh" || ghost.status === "impending") {
         // Card needs updating - redirect to customer portal
-        if (stripe && ghost.stripeCustomerId && merchant?.stripeAccountId) {
+        if (stripe && ghost.stripeCustomerId && merchant?.stripeUserId) {
           try {
             const session = await stripe.billingPortal.sessions.create(
               {
                 customer: ghost.stripeCustomerId,
                 return_url: getBaseUrl(req),
               },
-              { stripeAccount: merchant.stripeAccountId }
+              { stripeAccount: merchant.stripeUserId }
             );
             console.log(`[ATTRIBUTION] card_refresh/impending -> Customer Portal`);
             return res.redirect(302, session.url);
