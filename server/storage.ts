@@ -68,6 +68,14 @@ export interface HistoricalRevenueStats {
   monthlyTrend: MonthlyTrendPoint[];
   dailyPulse: DailyPulsePoint[];
   grossInvoicedCents: number; // Total ecosystem volume: SUM(amount) across ALL ghost_targets rows
+  // Sprint 3.2: Conversion Funnel Metrics
+  funnel: {
+    totalGhosts: number;
+    nudgedCount: number;      // email_count > 0
+    clickedCount: number;     // click_count > 0
+    recoveredCount: number;   // status = 'recovered'
+  };
+  recoveryRate: number; // (recoveredCount / totalGhosts) * 100
 }
 
 export interface ShadowRevenueUpdate {
@@ -482,6 +490,7 @@ export class DatabaseStorage implements IStorage {
     // All-Time Leaked: Every ghost ever discovered
     // Active Leakage (Money on Table): All ghosts except recovered
     // Gross Invoiced: Read from merchant (set by Ghost Hunter from ALL Stripe invoices)
+    // Sprint 3.2: Added funnel metrics (nudged, clicked, recovered counts)
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(*)::bigint AS total_count,
@@ -489,17 +498,23 @@ export class DatabaseStorage implements IStorage {
         COALESCE(SUM(CASE WHEN status != 'recovered' THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
         COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered,
         COALESCE(SUM(CASE WHEN status = 'impending' THEN amount ELSE 0 END), 0)::bigint AS impending_leakage,
-        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected
+        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected,
+        COUNT(CASE WHEN email_count > 0 THEN 1 END)::bigint AS nudged_count,
+        COUNT(CASE WHEN click_count > 0 THEN 1 END)::bigint AS clicked_count,
+        COUNT(CASE WHEN status = 'recovered' THEN 1 END)::bigint AS recovered_count
       FROM ghost_targets
       WHERE merchant_id = ${merchantId}
     `);
     
     const row = aggregateResult.rows[0] as any;
+    const totalGhosts = Number(row?.total_count || 0);
+    const recoveredCount = Number(row?.recovered_count || 0);
+    const recoveryRate = totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0;
     
     return {
       lifetime: {
         allTimeLeakedCents: Number(row?.all_time_leaked || 0),
-        totalGhostCount: Number(row?.total_count || 0),
+        totalGhostCount: totalGhosts,
         totalRecoveredCents: Number(row?.total_recovered || 0),
       },
       defaultCurrency: merchant?.defaultCurrency || 'gbp',
@@ -508,6 +523,14 @@ export class DatabaseStorage implements IStorage {
       monthlyTrend,
       dailyPulse,
       grossInvoicedCents: Number(merchant?.grossInvoicedCents || 0),
+      // Sprint 3.2: Conversion Funnel Metrics
+      funnel: {
+        totalGhosts,
+        nudgedCount: Number(row?.nudged_count || 0),
+        clickedCount: Number(row?.clicked_count || 0),
+        recoveredCount,
+      },
+      recoveryRate,
     };
   }
 
