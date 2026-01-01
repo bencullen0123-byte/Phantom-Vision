@@ -1,5 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 
+interface CategoryData {
+  category: string;
+  value: number;
+  count: number;
+  percentage: number;
+  color: string;
+}
+
+export interface LeakageDistribution {
+  categories: CategoryData[];
+  totalValue: number;
+  activeGhostCount: number;
+  insight: string;
+}
+
 export interface MerchantStats {
   id: string;
   lastAuditAt: string | null;
@@ -16,6 +31,7 @@ export interface MerchantStats {
   grossInvoicedCents: number;
   monthlyTrend: { month: string; leaked: number; recovered: number }[];
   dailyPulse: { date: string; leaked: number; recovered: number }[];
+  leakageDistribution?: LeakageDistribution;
 }
 
 export function useMerchantStats() {

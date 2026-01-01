@@ -457,6 +457,20 @@ export async function registerRoutes(
     try {
       const historicalStats = await storage.getHistoricalRevenueStats(merchantId);
 
+      // Build leakage distribution for donut chart
+      const ghosts = await storage.getGhostTargetsByMerchant(merchantId);
+      const activeGhosts = ghosts.filter(g => g.status === "pending" || g.status === "impending");
+      const { aggregateByCategory, getCategoryRecoverability } = await import("@shared/leakageCategories");
+      const categoryData = aggregateByCategory(activeGhosts);
+      const totalValue = categoryData.reduce((sum, cat) => sum + cat.value, 0);
+      
+      const dominant = categoryData[0];
+      let insight = "";
+      if (dominant) {
+        const recoverability = getCategoryRecoverability(dominant.category);
+        insight = `${dominant.percentage}% of your leakage is '${dominant.category}'. These are ${recoverability}% recoverable with Pulse Retries.`;
+      }
+
       return res.json({
         id: merchant.id,
         lastAuditAt: merchant.lastAuditAt,
@@ -468,10 +482,17 @@ export async function registerRoutes(
         totalProtectedCents: historicalStats.totalProtectedCents,
         monthlyTrend: historicalStats.monthlyTrend,
         dailyPulse: historicalStats.dailyPulse,
+        grossInvoicedCents: historicalStats.grossInvoicedCents,
         businessName: merchant.businessName,
         supportEmail: merchant.supportEmail,
         brandColor: merchant.brandColor,
         autoPilotEnabled: merchant.autoPilotEnabled,
+        leakageDistribution: {
+          categories: categoryData,
+          totalValue,
+          activeGhostCount: activeGhosts.length,
+          insight,
+        },
       });
     } catch (error: any) {
       console.error("[STATS] Failed to get merchant stats:", error);
