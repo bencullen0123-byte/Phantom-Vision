@@ -78,6 +78,13 @@ export const ghostTargets = pgTable("ghost_targets", {
   // Failure Capture Expansion: detailed Stripe failure info from Payment Intent
   failureCode: text("failure_code"),
   failureMessage: text("failure_message"),
+  // Universal Revenue Intelligence: ML metadata (non-PII, queryable)
+  cardBrand: text("card_brand"), // e.g., Visa, Mastercard, Amex
+  cardFunding: text("card_funding"), // e.g., credit, debit, prepaid
+  countryCode: text("country_code"), // Customer/Issuer ISO country
+  requires3ds: boolean("requires_3ds"), // Technical vs. Financial failure flag
+  stripeErrorCode: text("stripe_error_code"), // Raw decline/error code for ML features
+  originalInvoiceDate: timestamp("original_invoice_date"), // Temporal anchor for recovery velocity
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -108,6 +115,13 @@ export interface InsertGhostTarget {
   stripeCustomerId?: string | null;
   failureCode?: string | null;
   failureMessage?: string | null;
+  // Universal Revenue Intelligence: ML metadata (non-PII)
+  cardBrand?: string | null;
+  cardFunding?: string | null;
+  countryCode?: string | null;
+  requires3ds?: boolean | null;
+  stripeErrorCode?: string | null;
+  originalInvoiceDate?: Date | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -131,6 +145,13 @@ export interface GhostTarget {
   stripeCustomerId: string | null;
   failureCode: string | null;
   failureMessage: string | null;
+  // Universal Revenue Intelligence: ML metadata (non-PII)
+  cardBrand: string | null;
+  cardFunding: string | null;
+  countryCode: string | null;
+  requires3ds: boolean | null;
+  stripeErrorCode: string | null;
+  originalInvoiceDate: Date | null;
 }
 
 // Raw database type (encrypted fields)
