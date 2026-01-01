@@ -667,8 +667,9 @@ export async function registerRoutes(
     }
   });
 
-  // Attribution Proxy Link - tracks clicks and redirects to Stripe (Sprint 2.5.1 Hardened)
-  // Sets phantom_attribution cookie (24h), logs click in ghost_targets, and routes by recovery strategy
+  // Attribution Proxy Link - tracks clicks and redirects to Stripe (Sprint 2.5.2 Enhanced)
+  // Sets phantom_attribution cookie (24h), logs click in ghost_targets, routes by recovery strategy
+  // Fetches actual Stripe URLs and logs redirect verification
   app.get("/api/l/:targetId", async (req: Request, res: Response) => {
     const { targetId } = req.params;
     
@@ -681,7 +682,6 @@ export async function registerRoutes(
         try {
           const merchant = await storage.getMerchant(merchantId);
           if (merchant?.supportEmail) {
-            // Redirect to mailto: support if available
             console.log(`[ATTRIBUTION] Fallback to merchant support: ${merchant.supportEmail}`);
             return res.redirect(302, `mailto:${merchant.supportEmail}?subject=Payment%20Assistance`);
           }
@@ -689,9 +689,23 @@ export async function registerRoutes(
           // Ignore errors, fall through to generic
         }
       }
-      // Generic fallback - Stripe help page
       console.log(`[ATTRIBUTION] Fallback to generic Stripe help`);
       return res.redirect(302, "https://support.stripe.com/contact");
+    };
+
+    // Helper: log redirect verification to system_logs
+    const logRedirectVerification = async (strategy: string | null, destinationType: "Portal" | "Invoice" | "Success", targetId: string) => {
+      await storage.createSystemLog({
+        jobName: "redirect_verification",
+        status: "success",
+        details: JSON.stringify({
+          targetId,
+          strategy: strategy || "none",
+          destinationType,
+          timestamp: new Date().toISOString()
+        }),
+        errorMessage: null
+      });
     };
 
     try {
@@ -706,6 +720,13 @@ export async function registerRoutes(
       if (ghost.purgeAt && new Date() > new Date(ghost.purgeAt)) {
         console.warn(`[ATTRIBUTION] Expired target: ${targetId}`);
         return gracefulFallback(ghost.merchantId);
+      }
+
+      // Sprint 2.5.2: Data Integrity Check - if already recovered/protected, redirect to success page
+      if (ghost.status === "recovered" || ghost.status === "protected") {
+        console.log(`[ATTRIBUTION] Ghost already ${ghost.status}, redirecting to success page`);
+        await logRedirectVerification(ghost.recoveryStrategy, "Success", targetId);
+        return res.redirect(302, `${getBaseUrl(req)}/payment-received?status=${ghost.status}`);
       }
 
       // Sprint 2.5.1: Record click in ghost_targets (atomic increment)
@@ -735,29 +756,49 @@ export async function registerRoutes(
 
       console.log(`[ATTRIBUTION] Cookie set for target ${ghost.id}, click #${(ghost.clickCount || 0) + 1}, expires: ${cookieExpiry.toISOString()}`);
 
-      // Sprint 2.5.1: Dynamic redirect based on recoveryStrategy and status
+      // Sprint 2.5.2: Dynamic redirect based on recoveryStrategy with real Stripe URLs
       const stripe = getStripeClient();
       const merchant = await storage.getMerchant(ghost.merchantId);
+      const successReturnUrl = `${getBaseUrl(req)}/payment-received?targetId=${targetId}`;
 
-      // Strategy-based routing (priority: strategy > status)
+      // Helper: fetch hosted_invoice_url from Stripe Invoice object
+      const fetchHostedInvoiceUrl = async (): Promise<string | null> => {
+        if (!stripe || !merchant?.stripeUserId) return null;
+        try {
+          const invoice = await stripe.invoices.retrieve(
+            ghost.invoiceId,
+            { stripeAccount: merchant.stripeUserId }
+          );
+          return invoice.hosted_invoice_url || null;
+        } catch (err: any) {
+          console.error(`[ATTRIBUTION] Failed to fetch invoice URL:`, err.message);
+          return null;
+        }
+      };
+
+      // Strategy-based routing with real Stripe URLs
       if (ghost.recoveryStrategy === "technical_bridge") {
-        // 3DS authentication required - redirect to hosted invoice for authentication flow
-        console.log(`[ATTRIBUTION] technical_bridge -> Hosted Invoice for 3DS auth`);
-        return res.redirect(302, `https://invoice.stripe.com/i/${ghost.invoiceId}`);
+        // 3DS authentication required - fetch hosted invoice URL from Stripe
+        const hostedUrl = await fetchHostedInvoiceUrl();
+        const redirectUrl = hostedUrl || `https://invoice.stripe.com/i/${ghost.invoiceId}`;
+        console.log(`[ATTRIBUTION] technical_bridge -> Invoice (3DS auth)`);
+        await logRedirectVerification(ghost.recoveryStrategy, "Invoice", targetId);
+        return res.redirect(302, redirectUrl);
       }
 
       if (ghost.recoveryStrategy === "card_refresh" || ghost.status === "impending") {
-        // Card needs updating - redirect to customer portal
+        // Card needs updating - generate Customer Portal session
         if (stripe && ghost.stripeCustomerId && merchant?.stripeUserId) {
           try {
             const session = await stripe.billingPortal.sessions.create(
               {
                 customer: ghost.stripeCustomerId,
-                return_url: getBaseUrl(req),
+                return_url: successReturnUrl,
               },
               { stripeAccount: merchant.stripeUserId }
             );
             console.log(`[ATTRIBUTION] card_refresh/impending -> Customer Portal`);
+            await logRedirectVerification(ghost.recoveryStrategy, "Portal", targetId);
             return res.redirect(302, session.url);
           } catch (portalError: any) {
             console.error(`[ATTRIBUTION] Portal creation failed:`, portalError.message);
@@ -766,14 +807,47 @@ export async function registerRoutes(
         }
       }
 
-      // Default: redirect to hosted invoice (smart_retry, high_value_manual, pending)
-      console.log(`[ATTRIBUTION] default -> Hosted Invoice`);
-      return res.redirect(302, `https://invoice.stripe.com/i/${ghost.invoiceId}`);
+      // smart_retry, high_value_manual, or fallback: fetch hosted invoice URL
+      const hostedUrl = await fetchHostedInvoiceUrl();
+      const redirectUrl = hostedUrl || `https://invoice.stripe.com/i/${ghost.invoiceId}`;
+      console.log(`[ATTRIBUTION] ${ghost.recoveryStrategy || 'default'} -> Invoice`);
+      await logRedirectVerification(ghost.recoveryStrategy, "Invoice", targetId);
+      return res.redirect(302, redirectUrl);
       
     } catch (error: any) {
       console.error(`[ATTRIBUTION] Error processing target ${targetId}:`, error.message);
       return gracefulFallback();
     }
+  });
+
+  // Sprint 2.5.2: Payment Received / Success confirmation page
+  app.get("/payment-received", async (_req: Request, res: Response) => {
+    // Simple HTML confirmation page for successful payment redirects
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Received</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .container { text-align: center; max-width: 400px; padding: 40px; }
+    .icon { font-size: 64px; margin-bottom: 24px; }
+    h1 { font-size: 24px; margin-bottom: 16px; color: #10b981; }
+    p { font-size: 16px; color: #94a3b8; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">&#10003;</div>
+    <h1>Thank You!</h1>
+    <p>Your payment has been received or your payment method has been updated successfully. You can close this window.</p>
+  </div>
+</body>
+</html>`;
+    res.setHeader("Content-Type", "text/html");
+    return res.send(html);
   });
 
   // ============================================================
