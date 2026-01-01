@@ -318,3 +318,17 @@
 .animate-heartbeat {
   animation: heartbeat-pulse 1.5s ease-in-out infinite;
 }
+
+/* Sentinel Armed - emerald glow for armed state */
+@keyframes sentinel-armed {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px rgba(16, 185, 129, 0.5);
+  }
+}
+
+.animate-sentinel-armed {
+  animation: sentinel-armed 2s ease-in-out infinite;
+}

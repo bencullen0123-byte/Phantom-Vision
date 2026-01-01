@@ -1,10 +1,24 @@
 import { useMerchant } from "@/context/MerchantContext";
-import { Settings, Shield, Loader2, Building2, Mail, Palette, Zap, Save } from "lucide-react";
+import { 
+  Settings, 
+  Shield, 
+  Loader2, 
+  Building2, 
+  Mail, 
+  Palette, 
+  Save,
+  Lock,
+  CheckCircle,
+  RefreshCw,
+  CreditCard,
+  Zap
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -61,6 +75,199 @@ function BrandPreview({ businessName, brandColor }: { businessName: string; bran
   );
 }
 
+interface PlaybookCardProps {
+  title: string;
+  description: string;
+  icon: typeof Shield;
+  iconColor: string;
+  isActive: boolean;
+}
+
+function PlaybookCard({ title, description, icon: Icon, iconColor, isActive }: PlaybookCardProps) {
+  return (
+    <div className="flex items-center justify-between p-3 rounded-md border border-white/10 bg-slate-800/50">
+      <div className="flex items-center gap-3">
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${iconColor}`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-white">{title}</p>
+          <p className="text-xs text-slate-500">{description}</p>
+        </div>
+      </div>
+      <Badge 
+        variant="outline" 
+        className={isActive 
+          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-xs" 
+          : "bg-amber-500/20 text-amber-300 border-amber-500/30 text-xs"
+        }
+      >
+        {isActive ? (
+          <>
+            <CheckCircle className="w-3 h-3 mr-1" />
+            Active
+          </>
+        ) : (
+          "Ready"
+        )}
+      </Badge>
+    </div>
+  );
+}
+
+function SentinelArmingStation() {
+  const { merchant, refetch } = useMerchant();
+  const { toast } = useToast();
+  
+  const [isArmed, setIsArmed] = useState(false);
+  const [isToggling, setIsToggling] = useState(false);
+  
+  const hasSupportEmail = Boolean(merchant?.supportEmail?.trim());
+
+  useEffect(() => {
+    if (merchant) {
+      setIsArmed(merchant.autoPilotEnabled || false);
+    }
+  }, [merchant]);
+
+  const toggleMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await apiRequest("PATCH", "/api/merchant/branding", {
+        autoPilotEnabled: enabled,
+      });
+      return res.json();
+    },
+    onSuccess: (_, enabled) => {
+      toast({
+        title: enabled ? "Sentinel Armed" : "Sentinel Disarmed",
+        description: enabled 
+          ? "Auto-Pilot is now active. Recovery emails will be sent automatically."
+          : "Auto-Pilot disabled. Manual approval required for recovery emails.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      setIsArmed(!isArmed);
+      toast({
+        title: "Failed to update",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleToggle = async (enabled: boolean) => {
+    if (!hasSupportEmail && enabled) {
+      toast({
+        title: "Security Lock Active",
+        description: "Add a support email before enabling Auto-Pilot.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsArmed(enabled);
+    setIsToggling(true);
+    toggleMutation.mutate(enabled);
+    setIsToggling(false);
+  };
+
+  return (
+    <Card className={`bg-slate-900 border-2 transition-all duration-500 ${
+      isArmed 
+        ? "border-emerald-500/50 animate-sentinel-armed" 
+        : "border-white/10"
+    }`}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-white">
+          <Shield className={`w-5 h-5 ${isArmed ? "text-emerald-400" : "text-slate-400"}`} />
+          Sentinel Auto-Pilot
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className={`p-6 rounded-lg border-2 transition-all duration-300 ${
+          isArmed 
+            ? "bg-emerald-500/10 border-emerald-500/30" 
+            : "bg-slate-800/50 border-white/10"
+        }`}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${
+                isArmed 
+                  ? "bg-emerald-500/30" 
+                  : "bg-slate-700"
+              }`}>
+                {isArmed ? (
+                  <Zap className="w-7 h-7 text-emerald-400" />
+                ) : (
+                  <Lock className="w-7 h-7 text-slate-400" />
+                )}
+              </div>
+              <div>
+                <h3 className={`text-xl font-semibold ${isArmed ? "text-emerald-400" : "text-white"}`}>
+                  {isArmed ? "SENTINEL ARMED" : "Sentinel Standby"}
+                </h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  {isArmed 
+                    ? "Autonomous recovery is active. Ghosts are being hunted." 
+                    : "Toggle to enable autonomous email recovery."
+                  }
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <Switch
+                checked={isArmed}
+                onCheckedChange={handleToggle}
+                disabled={isToggling || (!hasSupportEmail && !isArmed)}
+                className={`scale-125 ${isArmed ? "data-[state=checked]:bg-emerald-600" : ""}`}
+                data-testid="switch-sentinel-autopilot"
+              />
+              {!hasSupportEmail && (
+                <span className="text-xs text-amber-400 flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  Add support email
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-400" />
+            Protection Coverage Audit
+          </h4>
+          <div className="space-y-2">
+            <PlaybookCard
+              title="Technical Bridge"
+              description="3DS authentication recovery"
+              icon={Shield}
+              iconColor="bg-purple-500/20 text-purple-400"
+              isActive={isArmed}
+            />
+            <PlaybookCard
+              title="Card Refresh"
+              description="Expired/declined card outreach"
+              icon={CreditCard}
+              iconColor="bg-orange-500/20 text-orange-400"
+              isActive={isArmed}
+            />
+            <PlaybookCard
+              title="Smart Retry"
+              description="Liquidity timing optimization"
+              icon={RefreshCw}
+              iconColor="bg-blue-500/20 text-blue-400"
+              isActive={isArmed}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MerchantProfileForm() {
   const { merchant, refetch } = useMerchant();
   const { toast } = useToast();
@@ -84,7 +291,7 @@ function MerchantProfileForm() {
   }, [merchant]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: BrandingFormData) => {
+    mutationFn: async (data: Omit<BrandingFormData, 'autoPilotEnabled'>) => {
       const res = await apiRequest("PATCH", "/api/merchant/branding", data);
       return res.json();
     },
@@ -107,7 +314,8 @@ function MerchantProfileForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateMutation.mutate(formData);
+    const { autoPilotEnabled, ...brandingData } = formData;
+    updateMutation.mutate(brandingData);
   };
 
   const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,26 +392,6 @@ function MerchantProfileForm() {
               <p className="text-xs text-slate-500">Used in email buttons and headers</p>
             </div>
 
-            <div className="space-y-4 pt-4 border-t border-white/10">
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="autoPilot" className="text-slate-300 flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-amber-400" />
-                    Auto-Pilot Mode
-                  </Label>
-                  <p className="text-xs text-slate-500">
-                    Automatically send recovery emails without manual approval
-                  </p>
-                </div>
-                <Switch
-                  id="autoPilot"
-                  checked={formData.autoPilotEnabled}
-                  onCheckedChange={(checked) => setFormData({ ...formData, autoPilotEnabled: checked })}
-                  data-testid="switch-auto-pilot"
-                />
-              </div>
-            </div>
-
             <Button 
               type="submit" 
               className="w-full bg-indigo-600 hover:bg-indigo-700"
@@ -248,9 +436,13 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-semibold text-white mb-2">Settings</h1>
-        <p className="text-slate-400">Manage your PHANTOM configuration and branding.</p>
+        <h1 className="text-3xl font-semibold text-white mb-2">The Control Plane</h1>
+        <p className="text-slate-400">Arm the Sentinel and configure your recovery mission parameters.</p>
       </div>
+
+      {isAuthenticated && merchant && (
+        <SentinelArmingStation />
+      )}
 
       {isAuthenticated && merchant && (
         <MerchantProfileForm />
