@@ -5,7 +5,6 @@ import { Loader2, Search, Ghost, ArrowUpDown } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -14,6 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { 
+  StatusBadge, 
+  StrategyBadge, 
+  AttributionBadge 
+} from "@/components/ui/forensic-badges";
 
 interface GhostTarget {
   id: string;
@@ -31,48 +35,6 @@ interface GhostTarget {
   recoveryStrategy: string | null;
   clickCount: number;
   lastClickedAt: string | null;
-}
-
-function getStatusBadge(status: string, emailCount: number) {
-  switch (status) {
-    case "recovered":
-      return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Recovered</Badge>;
-    case "exhausted":
-      return <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">Exhausted</Badge>;
-    case "pending":
-      if (emailCount > 0) {
-        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">Emailed ({emailCount})</Badge>;
-      }
-      return <Badge className="bg-indigo-500/20 text-indigo-400 border-indigo-500/30">Pending</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
-
-function getAttributionBadge(recoveryType: string | null) {
-  if (!recoveryType) return null;
-  
-  if (recoveryType === "direct") {
-    return <Badge className="bg-emerald-600/20 text-emerald-300 border-emerald-600/30">Direct</Badge>;
-  }
-  return <Badge className="bg-slate-600/20 text-slate-400 border-slate-600/30">Organic</Badge>;
-}
-
-function getRecoveryStrategyBadge(strategy: string | null) {
-  if (!strategy) return <span className="text-slate-600">-</span>;
-  
-  switch (strategy) {
-    case "technical_bridge":
-      return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">3DS Bridge</Badge>;
-    case "smart_retry":
-      return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Smart Retry</Badge>;
-    case "card_refresh":
-      return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Card Refresh</Badge>;
-    case "high_value_manual":
-      return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">VIP Manual</Badge>;
-    default:
-      return <Badge variant="outline" className="text-slate-400">{strategy}</Badge>;
-  }
 }
 
 function formatCurrency(cents: number): string {
@@ -256,10 +218,10 @@ function GhostLedger() {
                   {formatDate(ghost.discoveredAt)}
                 </TableCell>
                 <TableCell>
-                  {getStatusBadge(ghost.status, ghost.emailCount)}
+                  <StatusBadge status={ghost.status as "pending" | "nudged" | "recovered" | "protected" | "exhausted"} emailCount={ghost.emailCount} />
                 </TableCell>
                 <TableCell>
-                  {getRecoveryStrategyBadge(ghost.recoveryStrategy)}
+                  <StrategyBadge strategy={ghost.recoveryStrategy as "technical_bridge" | "smart_retry" | "card_refresh" | "high_value_manual" | null} />
                 </TableCell>
                 <TableCell className="text-sm">
                   {(() => {
@@ -272,7 +234,7 @@ function GhostLedger() {
                   })()}
                 </TableCell>
                 <TableCell>
-                  {getAttributionBadge(ghost.recoveryType)}
+                  <AttributionBadge type={ghost.recoveryType as "organic" | "pulse" | "phantom" | null} />
                 </TableCell>
               </TableRow>
             ))}

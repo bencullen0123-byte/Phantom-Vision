@@ -1,7 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { LayoutDashboard, Settings, DollarSign, LogOut, Clock, Shield } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -67,27 +66,17 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
   const Icon = item.icon;
   const isCollapsed = state === "collapsed";
 
-  const content = (
+  const button = (
     <SidebarMenuButton
       asChild
       isActive={isActive}
       className={isActive ? "bg-white/10 text-white" : "text-slate-400"}
     >
       <Link href={item.path}>
-        <Icon className="w-4 h-4" />
-        <AnimatePresence>
-          {!isCollapsed && (
-            <motion.span
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: "auto" }}
-              exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.15 }}
-              className="overflow-hidden whitespace-nowrap"
-            >
-              {item.label}
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <Icon className="w-4 h-4 shrink-0" />
+        <span className={`transition-opacity duration-150 ${isCollapsed ? "opacity-0 w-0" : "opacity-100"}`}>
+          {item.label}
+        </span>
       </Link>
     </SidebarMenuButton>
   );
@@ -96,7 +85,7 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
     return (
       <SidebarMenuItem>
         <Tooltip>
-          <TooltipTrigger asChild>{content}</TooltipTrigger>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
           <TooltipContent side="right" className="bg-slate-900 border-white/10">
             <div>
               <p className="font-medium text-white">{item.label}</p>
@@ -108,7 +97,7 @@ function SidebarNavItem({ item, isActive }: { item: NavItem; isActive: boolean }
     );
   }
 
-  return <SidebarMenuItem data-testid={`nav-${item.label.toLowerCase()}`}>{content}</SidebarMenuItem>;
+  return <SidebarMenuItem data-testid={`nav-${item.label.toLowerCase()}`}>{button}</SidebarMenuItem>;
 }
 
 function AppSidebar() {
@@ -130,27 +119,17 @@ function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-white/10 bg-obsidian">
       <SidebarHeader className="p-4">
         <Link href="/">
-          <motion.div
+          <div
             className="flex items-center gap-2 cursor-pointer"
             data-testid="nav-logo"
           >
-            <div className="w-8 h-8 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0">
               <span className="text-white font-bold text-sm">P</span>
             </div>
-            <AnimatePresence>
-              {!isCollapsed && (
-                <motion.span
-                  initial={{ opacity: 0, width: 0 }}
-                  animate={{ opacity: 1, width: "auto" }}
-                  exit={{ opacity: 0, width: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="text-lg font-semibold tracking-tight text-white overflow-hidden whitespace-nowrap"
-                >
-                  PHANTOM
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </motion.div>
+            <span className={`text-lg font-semibold tracking-tight text-white transition-opacity duration-150 overflow-hidden whitespace-nowrap ${isCollapsed ? "opacity-0 w-0" : "opacity-100"}`}>
+              PHANTOM
+            </span>
+          </div>
         </Link>
       </SidebarHeader>
 
@@ -181,18 +160,10 @@ function AppSidebar() {
                 className="w-full text-slate-400 hover:text-white justify-start gap-2"
                 data-testid="button-logout"
               >
-                <LogOut className="w-4 h-4" />
-                <AnimatePresence>
-                  {!isCollapsed && (
-                    <motion.span
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      Logout
-                    </motion.span>
-                  )}
-                </AnimatePresence>
+                <LogOut className="w-4 h-4 shrink-0" />
+                <span className={`transition-opacity duration-150 ${isCollapsed ? "opacity-0 w-0 hidden" : "opacity-100"}`}>
+                  Logout
+                </span>
               </Button>
             </TooltipTrigger>
             {isCollapsed && (
