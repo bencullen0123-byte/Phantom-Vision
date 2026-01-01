@@ -515,6 +515,23 @@ export async function registerRoutes(
     }
   });
 
+  // Diagnostic Pulse API - returns funnel metadata from last Ghost Hunter run
+  app.get("/api/diagnostic-pulse", requireMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const pulse = await storage.getDiagnosticPulse(merchantId);
+      return res.json(pulse);
+    } catch (error: any) {
+      console.error("[DIAGNOSTIC PULSE] Failed to retrieve pulse:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve diagnostic pulse",
+        error: error.message
+      });
+    }
+  });
+
   // Ghost Targets API - returns decrypted ghost targets for authenticated merchant
   app.get("/api/merchant/ghosts", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
