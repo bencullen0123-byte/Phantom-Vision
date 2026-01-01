@@ -1,4 +1,9 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { 
   CreditCard, 
   Globe, 
@@ -17,6 +22,7 @@ interface StrategyConfig {
   label: string;
   icon: typeof Shield;
   className: string;
+  tooltip: string;
 }
 
 const strategyConfigs: Record<string, StrategyConfig> = {
@@ -24,31 +30,42 @@ const strategyConfigs: Record<string, StrategyConfig> = {
     label: "3DS Bridge",
     icon: Shield,
     className: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+    tooltip: "Strategy: Technical Bridge — Initiated due to 3DS authentication failure. Customer needs to complete secure verification.",
   },
   smart_retry: {
     label: "Smart Retry",
     icon: RefreshCw,
     className: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+    tooltip: "Strategy: Smart Retry — Optimized timing for payment retry. Targeting improved liquidity window.",
   },
   card_refresh: {
     label: "Card Refresh",
     icon: CreditCard,
     className: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+    tooltip: "Strategy: Card Refresh — Card is expired or declined. Customer prompted to update payment method.",
   },
   high_value_manual: {
     label: "VIP Manual",
     icon: Crown,
     className: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+    tooltip: "Strategy: VIP Manual — High-value customer flagged for personalized outreach by merchant.",
   },
 };
 
 export function StrategyBadge({ strategy }: { strategy: RecoveryStrategy }) {
   if (!strategy) {
     return (
-      <Badge variant="outline" className="bg-slate-500/20 text-slate-400 border-slate-500/30 text-xs">
-        <HelpCircle className="w-3 h-3 mr-1" />
-        Pending
-      </Badge>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="bg-slate-500/20 text-slate-400 border-slate-500/30 text-xs cursor-help">
+            <HelpCircle className="w-3 h-3 mr-1" />
+            Pending
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <p className="text-xs">Strategy pending — Ghost recently detected, awaiting Sentinel classification.</p>
+        </TooltipContent>
+      </Tooltip>
     );
   }
 
@@ -63,10 +80,17 @@ export function StrategyBadge({ strategy }: { strategy: RecoveryStrategy }) {
 
   const Icon = config.icon;
   return (
-    <Badge variant="outline" className={`${config.className} text-xs`}>
-      <Icon className="w-3 h-3 mr-1" />
-      {config.label}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" className={`${config.className} text-xs cursor-help`}>
+          <Icon className="w-3 h-3 mr-1" />
+          {config.label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs">
+        <p className="text-xs">{config.tooltip}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
