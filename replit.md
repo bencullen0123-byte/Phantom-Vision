@@ -49,9 +49,11 @@ Preferred communication style: Simple, everyday language.
 - **Webhook Infrastructure (The Handshake):** `invoice.paid` and `customer.subscription.updated` events from Stripe webhooks mark ghosts as "recovered" or "protected" and attribute recoveries.
 
 ### UI/UX Features
+- **MainLayout:** Collapsible sidebar with 3 pages: Dashboard (The Audit), Recoveries (The Action), Settings (The Control Plane)
+- **Global Header:** Displays `lastAuditAt` (relative time) and `grossInvoicedCents` (Volume Guarded)
 - **DashboardPage:** Displays overall health, revenue guarded, shadow leakage, and impending risk. Includes conversion funnel and recovery rate.
-- **RecoveriesPage:** Manages ghost targets with last action and recovery strategy.
-- **SystemPage:** Financial Command Center with CFO KPIs and real-time intelligence log feed.
+- **RecoveriesPage:** Manages ghost targets with last action, recovery strategy, status, and attribution badges.
+- **Centralized Badges:** `forensic-badges.tsx` with StrategyBadge, StatusBadge, CardBrandBadge, CountryBadge, AttributionBadge
 - **Modular Components:** `MoneyHero` (revenue metrics, leakage health), `ForensicCharts` (monthly/daily trends), `LeakageDonut` (category distribution).
 - **Social Sharing:** Allows sharing of individual recovery wins and overall integrity reports.
 
