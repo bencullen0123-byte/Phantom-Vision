@@ -121,6 +121,13 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     stripeCustomerId: dbRecord.stripeCustomerId,
     failureCode: dbRecord.failureCode,
     failureMessage: dbRecord.failureMessage,
+    // Universal Revenue Intelligence: ML metadata (non-PII, pass through)
+    cardBrand: dbRecord.cardBrand,
+    cardFunding: dbRecord.cardFunding,
+    countryCode: dbRecord.countryCode,
+    requires3ds: dbRecord.requires3ds,
+    stripeErrorCode: dbRecord.stripeErrorCode,
+    originalInvoiceDate: dbRecord.originalInvoiceDate,
   };
 }
 
@@ -148,6 +155,13 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   stripeCustomerId?: string | null;
   failureCode?: string | null;
   failureMessage?: string | null;
+  // Universal Revenue Intelligence: ML metadata (non-PII)
+  cardBrand?: string | null;
+  cardFunding?: string | null;
+  countryCode?: string | null;
+  requires3ds?: boolean | null;
+  stripeErrorCode?: string | null;
+  originalInvoiceDate?: Date | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -173,6 +187,13 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     stripeCustomerId: target.stripeCustomerId,
     failureCode: target.failureCode,
     failureMessage: target.failureMessage,
+    // Universal Revenue Intelligence: ML metadata (non-PII, pass through)
+    cardBrand: target.cardBrand,
+    cardFunding: target.cardFunding,
+    countryCode: target.countryCode,
+    requires3ds: target.requires3ds,
+    stripeErrorCode: target.stripeErrorCode,
+    originalInvoiceDate: target.originalInvoiceDate,
   };
 }
 
