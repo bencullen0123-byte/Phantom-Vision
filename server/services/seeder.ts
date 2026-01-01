@@ -65,15 +65,17 @@ async function getOrCreateProduct(stripe: Stripe): Promise<{ productId: string; 
 async function createGhostScenario(
   stripe: Stripe,
   priceId: string,
-  index: number
+  index: number,
+  merchantId: string
 ): Promise<void> {
   const email = `${EMAIL_BASE}_ghost_${index}@gmail.com`;
+  const customerName = `Ghost Customer ${index}`;
   console.log(`[SEEDER] Creating Ghost #${index}: ${email}`);
   
   // Create customer with declined card token
   const customer = await stripe.customers.create({
     email,
-    name: `Ghost Customer ${index}`,
+    name: customerName,
     source: "tok_chargeDeclined",
     metadata: {
       phantom_test: "true",
@@ -97,14 +99,57 @@ async function createGhostScenario(
     // Expected - the subscription creation will fail due to declined card
     console.log(`[SEEDER] Ghost #${index} subscription failed (expected): ${err.message}`);
   }
+  
+  // DIRECT INJECTION: Fetch the invoice created for this customer and inject into ledger
+  const invoices = await stripe.invoices.list({ customer: customer.id, limit: 1 });
+  if (invoices.data.length > 0) {
+    const invoice = invoices.data[0];
+    const purgeAt = new Date();
+    purgeAt.setDate(purgeAt.getDate() + 90);
+    
+    await storage.upsertGhostTarget({
+      merchantId,
+      email,
+      customerName,
+      amount: invoice.amount_due || PRICE_AMOUNT,
+      invoiceId: invoice.id,
+      purgeAt,
+      status: "pending",
+      stripeCustomerId: customer.id,
+      failureReason: "card_declined",
+      declineType: "hard",
+    });
+    console.log(`[SEEDER] Ghost #${index} injected to ledger: ${invoice.id}, amount: ${invoice.amount_due}`);
+  } else {
+    // Fallback: create synthetic invoice ID if Stripe didn't generate one
+    const syntheticInvoiceId = `phantom_seed_ghost_${index}_${Date.now()}`;
+    const purgeAt = new Date();
+    purgeAt.setDate(purgeAt.getDate() + 90);
+    
+    await storage.upsertGhostTarget({
+      merchantId,
+      email,
+      customerName,
+      amount: PRICE_AMOUNT,
+      invoiceId: syntheticInvoiceId,
+      purgeAt,
+      status: "pending",
+      stripeCustomerId: customer.id,
+      failureReason: "card_declined",
+      declineType: "hard",
+    });
+    console.log(`[SEEDER] Ghost #${index} injected to ledger (synthetic): ${syntheticInvoiceId}`);
+  }
 }
 
 async function createRiskScenario(
   stripe: Stripe,
   priceId: string,
-  index: number
+  index: number,
+  merchantId: string
 ): Promise<void> {
   const email = `${EMAIL_BASE}_risk_${index}@gmail.com`;
+  const customerName = `Risk Customer ${index}`;
   // Alternate between January and February 2026
   const expMonth = index % 2 === 0 ? 1 : 2;
   console.log(`[SEEDER] Creating Risk #${index}: ${email} (expires ${expMonth}/2026)`);
@@ -112,7 +157,7 @@ async function createRiskScenario(
   // Create customer with payment method
   const customer = await stripe.customers.create({
     email,
-    name: `Risk Customer ${index}`,
+    name: customerName,
     metadata: {
       phantom_test: "true",
       scenario: "risk"
@@ -150,6 +195,22 @@ async function createRiskScenario(
     }
   });
   console.log(`[SEEDER] Risk #${index} subscription created: ${subscription.id}`);
+  
+  // DIRECT INJECTION: Insert impending risk into ledger
+  const purgeAt = new Date();
+  purgeAt.setDate(purgeAt.getDate() + 90);
+  
+  await storage.upsertGhostTarget({
+    merchantId,
+    email,
+    customerName,
+    amount: PRICE_AMOUNT,
+    invoiceId: `impending_${subscription.id}`,
+    purgeAt,
+    status: "impending",
+    stripeCustomerId: customer.id,
+  });
+  console.log(`[SEEDER] Risk #${index} injected to ledger as impending: ${subscription.id}`);
 }
 
 async function createSuccessScenario(
@@ -209,7 +270,7 @@ export async function runSeeder(): Promise<SeederResult> {
   // Create 10 Ghosts
   for (let i = 1; i <= 10; i++) {
     try {
-      await createGhostScenario(stripe, priceId, i);
+      await createGhostScenario(stripe, priceId, i, TEST_MERCHANT_ID);
       ghostsCreated++;
     } catch (err: any) {
       const msg = `Ghost #${i} failed: ${err.message}`;
@@ -223,7 +284,7 @@ export async function runSeeder(): Promise<SeederResult> {
   // Create 5 Risks
   for (let i = 1; i <= 5; i++) {
     try {
-      await createRiskScenario(stripe, priceId, i);
+      await createRiskScenario(stripe, priceId, i, TEST_MERCHANT_ID);
       risksCreated++;
     } catch (err: any) {
       const msg = `Risk #${i} failed: ${err.message}`;
