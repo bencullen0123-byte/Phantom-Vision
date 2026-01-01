@@ -90,6 +90,9 @@ export const ghostTargets = pgTable("ghost_targets", {
   // Recovery Strategy Selector (Sprint 2.3): categorizes ghost for Sentinel recovery approach
   // Values: 'technical_bridge', 'smart_retry', 'card_refresh', 'high_value_manual'
   recoveryStrategy: text("recovery_strategy"),
+  // Attribution Link Tracking (Sprint 2.5.1): click analytics for recovery links
+  clickCount: integer("click_count").default(0).notNull(),
+  lastClickedAt: timestamp("last_clicked_at"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -129,6 +132,9 @@ export interface InsertGhostTarget {
   originalInvoiceDate?: Date | null;
   // Recovery Strategy Selector (Sprint 2.3)
   recoveryStrategy?: string | null;
+  // Attribution Link Tracking (Sprint 2.5.1)
+  clickCount?: number;
+  lastClickedAt?: Date | null;
 }
 
 // Application-level type with plaintext PII (returned by storage layer)
@@ -161,6 +167,9 @@ export interface GhostTarget {
   originalInvoiceDate: Date | null;
   // Recovery Strategy Selector (Sprint 2.3)
   recoveryStrategy: string | null;
+  // Attribution Link Tracking (Sprint 2.5.1)
+  clickCount: number;
+  lastClickedAt: Date | null;
 }
 
 // Raw database type (encrypted fields)

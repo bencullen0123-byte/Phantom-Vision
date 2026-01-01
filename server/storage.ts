@@ -130,6 +130,9 @@ function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
     originalInvoiceDate: dbRecord.originalInvoiceDate,
     // Recovery Strategy Selector (Sprint 2.3)
     recoveryStrategy: dbRecord.recoveryStrategy,
+    // Attribution Link Tracking (Sprint 2.5.1)
+    clickCount: dbRecord.clickCount,
+    lastClickedAt: dbRecord.lastClickedAt,
   };
 }
 
@@ -166,6 +169,9 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   originalInvoiceDate?: Date | null;
   // Recovery Strategy Selector (Sprint 2.3)
   recoveryStrategy?: string | null;
+  // Attribution Link Tracking (Sprint 2.5.1)
+  clickCount?: number;
+  lastClickedAt?: Date | null;
 } {
   const encryptedEmail = encrypt(target.email);
   const encryptedCustomerName = encrypt(target.customerName);
@@ -200,6 +206,9 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     originalInvoiceDate: target.originalInvoiceDate,
     // Recovery Strategy Selector (Sprint 2.3)
     recoveryStrategy: target.recoveryStrategy,
+    // Attribution Link Tracking (Sprint 2.5.1)
+    clickCount: target.clickCount,
+    lastClickedAt: target.lastClickedAt,
   };
 }
 
@@ -240,6 +249,7 @@ export interface IStorage {
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
   setGhostAttributionFlag(id: string, expiresAt: Date): Promise<GhostTarget | undefined>;
+  recordGhostClick(id: string): Promise<GhostTarget | undefined>;
   
   // Liquidity Oracle
   getLiquidityOracleEntry(id: string): Promise<LiquidityOracle | undefined>;
@@ -714,6 +724,19 @@ export class DatabaseStorage implements IStorage {
       .update(ghostTargets)
       .set({
         attributionExpiresAt: expiresAt,
+      })
+      .where(eq(ghostTargets.id, id))
+      .returning();
+    if (!dbRecord) return undefined;
+    return decryptGhostTarget(dbRecord);
+  }
+
+  async recordGhostClick(id: string): Promise<GhostTarget | undefined> {
+    const [dbRecord] = await db
+      .update(ghostTargets)
+      .set({
+        clickCount: sql`${ghostTargets.clickCount} + 1`,
+        lastClickedAt: new Date(),
       })
       .where(eq(ghostTargets.id, id))
       .returning();
