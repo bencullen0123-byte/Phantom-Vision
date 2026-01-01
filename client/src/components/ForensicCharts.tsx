@@ -19,6 +19,8 @@ export default function ForensicCharts() {
     );
   }
 
+  const currency = stats.defaultCurrency || "usd";
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div className="bg-slate-900/50 border border-white/5 rounded-md p-6">
@@ -26,7 +28,7 @@ export default function ForensicCharts() {
           <h3 className="text-sm font-medium text-slate-300">Historical Trend</h3>
           <span className="text-xs text-slate-500">Monthly breakdown</span>
         </div>
-        <MonthlyTrendChart data={stats.monthlyTrend} />
+        <MonthlyTrendChart data={stats.monthlyTrend} currency={currency} />
       </div>
 
       <div className="bg-slate-900/50 border border-white/5 rounded-md p-6">
@@ -34,7 +36,7 @@ export default function ForensicCharts() {
           <h3 className="text-sm font-medium text-slate-300">30-Day Velocity</h3>
           <span className="text-xs text-slate-500">Daily activity</span>
         </div>
-        <DailyPulseChart data={stats.dailyPulse} />
+        <DailyPulseChart data={stats.dailyPulse} currency={currency} />
       </div>
     </div>
   );

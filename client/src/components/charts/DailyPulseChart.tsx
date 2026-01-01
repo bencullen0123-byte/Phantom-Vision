@@ -3,12 +3,34 @@ import type { DailyPulsePoint } from "@/context/MerchantContext";
 
 interface DailyPulseChartProps {
   data: DailyPulsePoint[];
+  currency?: string;
 }
 
-function formatCurrency(cents: number): string {
+function getCurrencySymbol(currency: string): string {
+  const symbols: Record<string, string> = {
+    gbp: "£",
+    usd: "$",
+    eur: "€",
+    aud: "A$",
+    cad: "C$",
+    jpy: "¥",
+  };
+  return symbols[currency.toLowerCase()] || currency.toUpperCase() + " ";
+}
+
+function formatCurrency(cents: number, currency: string = "gbp"): string {
+  const symbol = getCurrencySymbol(currency);
+  const value = Math.abs(cents / 100);
+  if (value >= 1000) {
+    return `${symbol}${(value / 1000).toFixed(1)}k`;
+  }
+  return `${symbol}${Math.round(value)}`;
+}
+
+function formatCurrencyFull(cents: number, currency: string = "gbp"): string {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
-    currency: "GBP",
+    currency: currency.toUpperCase(),
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(cents / 100);
@@ -19,7 +41,13 @@ function formatDate(dateStr: string): string {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-export default function DailyPulseChart({ data }: DailyPulseChartProps) {
+function sortChronologically(data: DailyPulsePoint[]): DailyPulsePoint[] {
+  return [...data].sort((a, b) => {
+    return new Date(a.date).getTime() - new Date(b.date).getTime();
+  });
+}
+
+export default function DailyPulseChart({ data, currency = "gbp" }: DailyPulseChartProps) {
   if (!data || data.length === 0) {
     return (
       <div className="h-[220px] flex items-center justify-center text-slate-500">
@@ -28,7 +56,8 @@ export default function DailyPulseChart({ data }: DailyPulseChartProps) {
     );
   }
 
-  const formattedData = data.map(d => ({
+  const sortedData = sortChronologically(data);
+  const formattedData = sortedData.map(d => ({
     ...d,
     label: formatDate(d.date),
   }));
@@ -59,7 +88,7 @@ export default function DailyPulseChart({ data }: DailyPulseChartProps) {
             axisLine={false}
             tickLine={false}
             tick={{ fill: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono" }}
-            tickFormatter={(v) => formatCurrency(v)}
+            tickFormatter={(v) => formatCurrency(v, currency)}
             width={60}
           />
           <Tooltip
@@ -71,7 +100,7 @@ export default function DailyPulseChart({ data }: DailyPulseChartProps) {
             }}
             labelStyle={{ color: "#e2e8f0", marginBottom: "4px" }}
             formatter={(value: number, name: string) => [
-              formatCurrency(value),
+              formatCurrencyFull(value, currency),
               name === "leaked" ? "New Leakage" : "Recovered"
             ]}
           />
