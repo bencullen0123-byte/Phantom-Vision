@@ -67,6 +67,7 @@ export interface HistoricalRevenueStats {
   totalProtectedCents: number;
   monthlyTrend: MonthlyTrendPoint[];
   dailyPulse: DailyPulsePoint[];
+  grossInvoicedCents: number; // Total ecosystem volume: SUM(amount) across ALL ghost_targets rows
 }
 
 export interface ShadowRevenueUpdate {
@@ -136,6 +137,7 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
   amount: number;
   invoiceId: string;
   purgeAt: Date;
+  discoveredAt?: Date;
   lastEmailedAt?: Date | null;
   emailCount?: number;
   status?: string;
@@ -160,6 +162,7 @@ function encryptGhostTargetForInsert(target: InsertGhostTarget): {
     amount: target.amount,
     invoiceId: target.invoiceId,
     purgeAt: target.purgeAt,
+    discoveredAt: target.discoveredAt, // Time-travel support for seeding
     lastEmailedAt: target.lastEmailedAt,
     emailCount: target.emailCount,
     status: target.status,
@@ -401,6 +404,7 @@ export class DatabaseStorage implements IStorage {
     // Pure Ledger Model: Live aggregate from ghost_targets (no stale merchant columns)
     // All-Time Leaked: Every ghost ever discovered
     // Active Leakage (Money on Table): All ghosts except recovered
+    // Gross Invoiced: Total ecosystem volume (ALL rows including paid, pending, impending)
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(*)::bigint AS total_count,
@@ -408,7 +412,8 @@ export class DatabaseStorage implements IStorage {
         COALESCE(SUM(CASE WHEN status != 'recovered' THEN amount ELSE 0 END), 0)::bigint AS active_leakage,
         COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered,
         COALESCE(SUM(CASE WHEN status = 'impending' THEN amount ELSE 0 END), 0)::bigint AS impending_leakage,
-        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected
+        COALESCE(SUM(CASE WHEN status = 'protected' THEN amount ELSE 0 END), 0)::bigint AS total_protected,
+        COALESCE(SUM(amount), 0)::bigint AS gross_ecosystem_volume
       FROM ghost_targets
       WHERE merchant_id = ${merchantId}
     `);
@@ -426,6 +431,7 @@ export class DatabaseStorage implements IStorage {
       totalProtectedCents: Number(row?.total_protected || 0),
       monthlyTrend,
       dailyPulse,
+      grossInvoicedCents: Number(row?.gross_ecosystem_volume || 0),
     };
   }
 

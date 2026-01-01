@@ -4,8 +4,18 @@ import { decrypt } from "../utils/crypto";
 
 const TEST_MERCHANT_ID = "8543bb9f-cda8-4631-951d-70fc7c01ec01";
 const PRODUCT_NAME = "PHANTOM Test Tier";
-const PRICE_AMOUNT = 5000; // £50.00 in pence
 const EMAIL_BASE = "bencullen0123+phantom";
+
+// High-Velocity Data Scaling: Variable Pricing Tiers (in cents)
+const PRICE_TIERS = [2500, 4900, 9900, 19900, 49900];
+
+// Multi-Currency Support
+const CURRENCIES: ("gbp" | "usd" | "eur")[] = ["gbp", "usd", "eur"];
+
+// Volume Expansion: 50 Paid, 25 Ghosts, 15 Risks = 90 total
+const GHOST_COUNT = 25;
+const RISK_COUNT = 15;
+const SUCCESS_COUNT = 50;
 
 interface SeederResult {
   success: boolean;
@@ -19,10 +29,29 @@ interface SeederResult {
   errors: string[];
 }
 
-async function getOrCreateProduct(stripe: Stripe): Promise<{ productId: string; priceId: string }> {
+// Time-Travel Logic: Generate random date within last 90 days
+function randomBackdate(): Date {
+  const now = Date.now();
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+  const randomOffset = Math.floor(Math.random() * ninetyDaysMs);
+  return new Date(now - randomOffset);
+}
+
+// Random selection helpers
+function randomPrice(): number {
+  return PRICE_TIERS[Math.floor(Math.random() * PRICE_TIERS.length)];
+}
+
+function randomCurrency(): "gbp" | "usd" | "eur" {
+  return CURRENCIES[Math.floor(Math.random() * CURRENCIES.length)];
+}
+
+// Cache for prices per currency (we need different Stripe prices for each currency)
+const priceCache: Map<string, string> = new Map();
+
+async function getOrCreateProduct(stripe: Stripe): Promise<{ productId: string }> {
   console.log("[SEEDER] Checking for existing PHANTOM Test Tier product...");
   
-  // Search for existing product
   const products = await stripe.products.list({ limit: 100 });
   let product = products.data.find(p => p.name === PRODUCT_NAME);
   
@@ -37,40 +66,60 @@ async function getOrCreateProduct(stripe: Stripe): Promise<{ productId: string; 
     console.log(`[SEEDER] Product found: ${product.id}`);
   }
   
-  // Get or create price
-  const prices = await stripe.prices.list({ product: product.id, limit: 10 });
+  return { productId: product.id };
+}
+
+async function getOrCreatePrice(
+  stripe: Stripe, 
+  productId: string, 
+  amount: number, 
+  currency: string
+): Promise<string> {
+  const cacheKey = `${productId}_${amount}_${currency}`;
+  
+  if (priceCache.has(cacheKey)) {
+    return priceCache.get(cacheKey)!;
+  }
+  
+  // Search for existing price
+  const prices = await stripe.prices.list({ product: productId, limit: 100 });
   let price = prices.data.find(p => 
-    p.unit_amount === PRICE_AMOUNT && 
-    p.currency === "gbp" && 
+    p.unit_amount === amount && 
+    p.currency === currency && 
     p.recurring?.interval === "month"
   );
   
   if (!price) {
-    console.log("[SEEDER] Creating £50/month price...");
+    console.log(`[SEEDER] Creating ${currency.toUpperCase()} ${amount/100} price...`);
     price = await stripe.prices.create({
-      product: product.id,
-      unit_amount: PRICE_AMOUNT,
-      currency: "gbp",
+      product: productId,
+      unit_amount: amount,
+      currency: currency,
       recurring: { interval: "month" },
       metadata: { phantom_test: "true" }
     });
-    console.log(`[SEEDER] Price created: ${price.id}`);
-  } else {
-    console.log(`[SEEDER] Price found: ${price.id}`);
   }
   
-  return { productId: product.id, priceId: price.id };
+  priceCache.set(cacheKey, price.id);
+  return price.id;
 }
 
 async function createGhostScenario(
   stripe: Stripe,
-  priceId: string,
+  productId: string,
   index: number,
   merchantId: string
 ): Promise<void> {
   const email = `${EMAIL_BASE}_ghost_${index}@gmail.com`;
   const customerName = `Ghost Customer ${index}`;
-  console.log(`[SEEDER] Creating Ghost #${index}: ${email}`);
+  const amount = randomPrice();
+  const currency = randomCurrency();
+  const discoveredAt = randomBackdate();
+  
+  console.log(`[SEEDER] Creating Ghost #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
+  
+  // Get or create price for this amount/currency combo
+  const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
   
   // Create customer without source first
   const customer = await stripe.customers.create({
@@ -81,19 +130,17 @@ async function createGhostScenario(
       scenario: "ghost"
     }
   });
-  console.log(`[SEEDER] Ghost customer created: ${customer.id}`);
   
   // Attach the decline-triggering card token
   try {
     await stripe.customers.createSource(customer.id, { source: "tok_chargeDeclined" });
   } catch (err: any) {
-    console.log(`[SEEDER] Ghost #${index} card attach failed (expected): ${err.message}`);
+    // Expected - card will be declined
   }
   
-  // Create subscription with allow_incomplete to let the invoice be created even with failed payment
-  let subscriptionId = "";
+  // Create subscription with allow_incomplete
   try {
-    const subscription = await stripe.subscriptions.create({
+    await stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: priceId }],
       metadata: {
@@ -102,67 +149,57 @@ async function createGhostScenario(
       },
       payment_behavior: "allow_incomplete",
     });
-    subscriptionId = subscription.id;
-    console.log(`[SEEDER] Ghost #${index} subscription created (may be incomplete): ${subscription.id}`);
   } catch (err: any) {
-    console.log(`[SEEDER] Ghost #${index} subscription failed: ${err.message}`);
+    // Expected - subscription may fail without payment method
   }
   
-  // DIRECT INJECTION: Fetch the invoice created for this customer and inject into ledger
+  // DIRECT INJECTION: Fetch invoice or use synthetic ID
   const invoices = await stripe.invoices.list({ customer: customer.id, limit: 1 });
-  if (invoices.data.length > 0) {
-    const invoice = invoices.data[0];
-    const purgeAt = new Date();
-    purgeAt.setDate(purgeAt.getDate() + 90);
-    
-    await storage.upsertGhostTarget({
-      merchantId,
-      email,
-      customerName,
-      amount: invoice.amount_due || PRICE_AMOUNT,
-      invoiceId: invoice.id,
-      purgeAt,
-      status: "pending",
-      stripeCustomerId: customer.id,
-      failureReason: "card_declined",
-      declineType: "hard",
-    });
-    console.log(`[SEEDER] Ghost #${index} injected to ledger: ${invoice.id}, amount: ${invoice.amount_due}`);
-  } else {
-    // Fallback: create synthetic invoice ID if Stripe didn't generate one
-    const syntheticInvoiceId = `phantom_seed_ghost_${index}_${Date.now()}`;
-    const purgeAt = new Date();
-    purgeAt.setDate(purgeAt.getDate() + 90);
-    
-    await storage.upsertGhostTarget({
-      merchantId,
-      email,
-      customerName,
-      amount: PRICE_AMOUNT,
-      invoiceId: syntheticInvoiceId,
-      purgeAt,
-      status: "pending",
-      stripeCustomerId: customer.id,
-      failureReason: "card_declined",
-      declineType: "hard",
-    });
-    console.log(`[SEEDER] Ghost #${index} injected to ledger (synthetic): ${syntheticInvoiceId}`);
-  }
+  const invoiceId = invoices.data.length > 0 
+    ? invoices.data[0].id 
+    : `phantom_seed_ghost_${index}_${Date.now()}`;
+  const invoiceAmount = invoices.data.length > 0 
+    ? (invoices.data[0].amount_due || amount) 
+    : amount;
+  
+  const purgeAt = new Date();
+  purgeAt.setDate(purgeAt.getDate() + 90);
+  
+  await storage.upsertGhostTarget({
+    merchantId,
+    email,
+    customerName,
+    amount: invoiceAmount,
+    invoiceId,
+    purgeAt,
+    discoveredAt, // Time-travel: backdate the discovery
+    status: "pending",
+    stripeCustomerId: customer.id,
+    failureReason: "card_declined",
+    declineType: "hard",
+  });
+  
+  console.log(`[SEEDER] Ghost #${index} injected: ${invoiceId}, ${currency.toUpperCase()} ${invoiceAmount/100}`);
 }
 
 async function createRiskScenario(
   stripe: Stripe,
-  priceId: string,
+  productId: string,
   index: number,
   merchantId: string
 ): Promise<void> {
   const email = `${EMAIL_BASE}_risk_${index}@gmail.com`;
   const customerName = `Risk Customer ${index}`;
-  // Alternate between January and February 2026
+  const amount = randomPrice();
+  const currency = randomCurrency();
+  const discoveredAt = randomBackdate();
   const expMonth = index % 2 === 0 ? 1 : 2;
-  console.log(`[SEEDER] Creating Risk #${index}: ${email} (expires ${expMonth}/2026)`);
   
-  // Create customer with source token (uses customer.createSource which restricted keys can access)
+  console.log(`[SEEDER] Creating Risk #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, expires ${expMonth}/2026, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
+  
+  const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
+  
+  // Create customer with source token
   const customer = await stripe.customers.create({
     email,
     name: customerName,
@@ -175,9 +212,7 @@ async function createRiskScenario(
     }
   });
   
-  console.log(`[SEEDER] Risk customer created: ${customer.id}`);
-  
-  // Create subscription using the default source
+  // Create subscription
   const subscription = await stripe.subscriptions.create({
     customer: customer.id,
     items: [{ price: priceId }],
@@ -188,9 +223,8 @@ async function createRiskScenario(
       simulated_exp_year: "2026"
     }
   });
-  console.log(`[SEEDER] Risk #${index} subscription created: ${subscription.id}`);
   
-  // DIRECT INJECTION: Insert impending risk into ledger
+  // DIRECT INJECTION
   const purgeAt = new Date();
   purgeAt.setDate(purgeAt.getDate() + 90);
   
@@ -198,22 +232,29 @@ async function createRiskScenario(
     merchantId,
     email,
     customerName,
-    amount: PRICE_AMOUNT,
+    amount,
     invoiceId: `impending_${subscription.id}`,
     purgeAt,
+    discoveredAt, // Time-travel
     status: "impending",
     stripeCustomerId: customer.id,
   });
-  console.log(`[SEEDER] Risk #${index} injected to ledger as impending: ${subscription.id}`);
+  
+  console.log(`[SEEDER] Risk #${index} injected: ${subscription.id}, ${currency.toUpperCase()} ${amount/100}`);
 }
 
 async function createSuccessScenario(
   stripe: Stripe,
-  priceId: string,
+  productId: string,
   index: number
 ): Promise<void> {
   const email = `${EMAIL_BASE}_success_${index}@gmail.com`;
-  console.log(`[SEEDER] Creating Success #${index}: ${email}`);
+  const amount = randomPrice();
+  const currency = randomCurrency();
+  
+  console.log(`[SEEDER] Creating Success #${index}: ${email} (${currency.toUpperCase()} ${amount/100})`);
+  
+  const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
   
   // Create customer with working card
   const customer = await stripe.customers.create({
@@ -225,10 +266,9 @@ async function createSuccessScenario(
       scenario: "success"
     }
   });
-  console.log(`[SEEDER] Success customer created: ${customer.id}`);
   
-  // Create subscription
-  const subscription = await stripe.subscriptions.create({
+  // Create subscription (these are healthy, don't inject to ledger)
+  await stripe.subscriptions.create({
     customer: customer.id,
     items: [{ price: priceId }],
     metadata: {
@@ -236,7 +276,8 @@ async function createSuccessScenario(
       scenario: "success"
     }
   });
-  console.log(`[SEEDER] Success #${index} subscription created: ${subscription.id}`);
+  
+  console.log(`[SEEDER] Success #${index} subscription created`);
 }
 
 export async function runSeeder(): Promise<SeederResult> {
@@ -245,7 +286,10 @@ export async function runSeeder(): Promise<SeederResult> {
   let risksCreated = 0;
   let successesCreated = 0;
   
-  console.log("[SEEDER] ===== SCENARIO SEEDER STARTING =====");
+  console.log("[SEEDER] ===== HIGH-VELOCITY SCENARIO SEEDER STARTING =====");
+  console.log(`[SEEDER] Target: ${GHOST_COUNT} Ghosts, ${RISK_COUNT} Risks, ${SUCCESS_COUNT} Successes`);
+  console.log(`[SEEDER] Price Tiers: ${PRICE_TIERS.map(p => p/100).join(', ')}`);
+  console.log(`[SEEDER] Currencies: ${CURRENCIES.join(', ').toUpperCase()}`);
   
   // Get merchant and decrypt their Stripe key
   const merchant = await storage.getMerchant(TEST_MERCHANT_ID);
@@ -256,58 +300,57 @@ export async function runSeeder(): Promise<SeederResult> {
   const stripeKey = decrypt(merchant.encryptedToken, merchant.iv, merchant.tag);
   const stripe = new Stripe(stripeKey, { apiVersion: "2025-12-15.clover" });
   
-  // Get or create product and price
-  const { productId, priceId } = await getOrCreateProduct(stripe);
+  // Get or create product
+  const { productId } = await getOrCreateProduct(stripe);
   
   console.log("[SEEDER] Beginning Manufacturing Loop...");
   
-  // Create 10 Ghosts
-  for (let i = 1; i <= 10; i++) {
+  // Create Ghosts
+  for (let i = 1; i <= GHOST_COUNT; i++) {
     try {
-      await createGhostScenario(stripe, priceId, i, TEST_MERCHANT_ID);
+      await createGhostScenario(stripe, productId, i, TEST_MERCHANT_ID);
       ghostsCreated++;
     } catch (err: any) {
       const msg = `Ghost #${i} failed: ${err.message}`;
       console.error(`[SEEDER] ${msg}`);
       errors.push(msg);
     }
-    // Small delay to avoid rate limits
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
   }
   
-  // Create 5 Risks
-  for (let i = 1; i <= 5; i++) {
+  // Create Risks
+  for (let i = 1; i <= RISK_COUNT; i++) {
     try {
-      await createRiskScenario(stripe, priceId, i, TEST_MERCHANT_ID);
+      await createRiskScenario(stripe, productId, i, TEST_MERCHANT_ID);
       risksCreated++;
     } catch (err: any) {
       const msg = `Risk #${i} failed: ${err.message}`;
       console.error(`[SEEDER] ${msg}`);
       errors.push(msg);
     }
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
   }
   
-  // Create 5 Successes
-  for (let i = 1; i <= 5; i++) {
+  // Create Successes
+  for (let i = 1; i <= SUCCESS_COUNT; i++) {
     try {
-      await createSuccessScenario(stripe, priceId, i);
+      await createSuccessScenario(stripe, productId, i);
       successesCreated++;
     } catch (err: any) {
       const msg = `Success #${i} failed: ${err.message}`;
       console.error(`[SEEDER] ${msg}`);
       errors.push(msg);
     }
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
   }
   
-  console.log("[SEEDER] ===== SCENARIO SEEDER COMPLETE =====");
-  console.log(`[SEEDER] Ghosts: ${ghostsCreated}/10, Risks: ${risksCreated}/5, Successes: ${successesCreated}/5`);
+  console.log("[SEEDER] ===== HIGH-VELOCITY SEEDER COMPLETE =====");
+  console.log(`[SEEDER] Ghosts: ${ghostsCreated}/${GHOST_COUNT}, Risks: ${risksCreated}/${RISK_COUNT}, Successes: ${successesCreated}/${SUCCESS_COUNT}`);
   
   return {
     success: errors.length === 0,
     productId,
-    priceId,
+    priceId: "dynamic",
     created: {
       ghosts: ghostsCreated,
       risks: risksCreated,

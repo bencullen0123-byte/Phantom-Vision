@@ -94,6 +94,7 @@ export interface InsertGhostTarget {
   amount: number;
   invoiceId: string;
   purgeAt: Date;
+  discoveredAt?: Date; // Optional: for time-travel seeding (backdating records)
   lastEmailedAt?: Date | null;
   emailCount?: number;
   status?: string;
