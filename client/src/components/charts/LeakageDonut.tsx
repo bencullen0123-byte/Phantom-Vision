@@ -11,11 +11,15 @@ interface CategoryData {
   color: string;
 }
 
-interface LeakageForensicsData {
+export interface LeakageForensicsData {
   categories: CategoryData[];
   totalValue: number;
   activeGhostCount: number;
   insight: string;
+}
+
+interface LeakageDonutProps {
+  data?: LeakageForensicsData;
 }
 
 function formatCurrency(cents: number): string {
@@ -27,12 +31,15 @@ function formatCurrency(cents: number): string {
   }).format(cents / 100);
 }
 
-export default function LeakageDonut() {
-  const { data, isLoading, error } = useQuery<LeakageForensicsData>({
+export default function LeakageDonut({ data: propData }: LeakageDonutProps) {
+  const { data: fetchedData, isLoading, error } = useQuery<LeakageForensicsData>({
     queryKey: ["/api/merchant/leakage-forensics"],
+    enabled: !propData,
   });
 
-  if (isLoading) {
+  const data = propData || fetchedData;
+
+  if (!propData && isLoading) {
     return (
       <Card className="bg-slate-900/50 border-white/5">
         <CardHeader className="pb-2">
@@ -50,7 +57,7 @@ export default function LeakageDonut() {
     );
   }
 
-  if (error || !data) {
+  if (!propData && (error || !data)) {
     return (
       <Card className="bg-slate-900/50 border-white/5">
         <CardHeader className="pb-2">
@@ -68,7 +75,7 @@ export default function LeakageDonut() {
     );
   }
 
-  if (data.categories.length === 0) {
+  if (!data || data.categories.length === 0) {
     return (
       <Card className="bg-slate-900/50 border-white/5">
         <CardHeader className="pb-2">
