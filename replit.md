@@ -92,6 +92,16 @@ Preferred communication style: Simple, everyday language.
   - Redirect verification logging with strategy and destinationType to system_logs
   - Data integrity checks: recovered/protected ghosts redirect to success page instead of payment links
   - `/payment-received` confirmation page for successful Customer Portal returns
+- **Golden Hour Email Engine** (Sprint 3.1):
+  - Immediate email trigger after ghost creation via webhook
+  - `sendGoldenHourEmail()` function with guardrails: emailCount === 0, status === pending, Auto-Pilot enabled
+  - Strategy-specific email templates with tailored subject lines, headlines, body copy, and CTA colors:
+    - `technical_bridge` (Purple): "Complete Your Secure Payment" - 3DS authentication flow
+    - `card_refresh` (Orange): "Update Your Payment Method" - expired/declined card update
+    - `smart_retry` (Blue): "Action Required: Payment failed" - standard retry prompt
+    - `high_value_manual` (Amber): "Important: Your Account Needs Attention" - VIP concierge approach
+  - Fire-and-forget webhook integration avoiding blocking response
+  - System logging to `golden_hour_email` job for Intelligence Feed
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
