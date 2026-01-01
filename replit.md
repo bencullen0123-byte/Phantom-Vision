@@ -50,12 +50,18 @@ Preferred communication style: Simple, everyday language.
 
 ### Universal Revenue Intelligence (ML Metadata)
 - **Non-PII Fields** (queryable for cross-merchant learning):
-  - `cardBrand` - Card network (Visa, Mastercard, Amex, etc.)
-  - `cardFunding` - Card type (credit, debit, prepaid)
-  - `countryCode` - Customer/issuer ISO country code
+  - `cardBrand` - Card network (visa, mastercard, amex, etc.) - normalized to lowercase
+  - `cardFunding` - Card type (credit, debit, prepaid) - normalized to lowercase
+  - `countryCode` - Customer/issuer ISO country code - normalized to lowercase
   - `requires3ds` - Whether 3D Secure was required (technical vs financial failure)
   - `stripeErrorCode` - Raw Stripe decline/error code for ML features
   - `originalInvoiceDate` - Temporal anchor for recovery velocity analysis
+- **Extraction Flow** (Sprint 2.1):
+  - Ghost Hunter expands `payment_intent.payment_method` from Stripe
+  - Extracts card brand, funding type, country from `pm.card` object
+  - Detects 3DS requirement from `requires_action` status or `authentication_required` error
+  - All string values normalized to lowercase for consistent ML training
+  - Fields updated on both INSERT (new ghosts) and UPDATE (re-scanned ghosts)
 
 ### Multi-Currency Revenue Firewall
 - **Currency Detection:** Automatically captures currency from first Stripe invoice during scan
