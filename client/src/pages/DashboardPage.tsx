@@ -1,4 +1,5 @@
 import { useMerchant } from "@/context/MerchantContext";
+import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, RefreshCw, Search, Shield, TrendingDown, TrendingUp, Zap } from "lucide-react";
@@ -229,13 +230,14 @@ function AutoPilotToggle() {
 
 function MoneyHero() {
   const { merchant } = useMerchant();
+  const { stats, isLoading: statsLoading } = useMerchantStats();
 
   if (!merchant) return null;
 
   const formatCurrency = (cents: number) => {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
-      currency: "GBP",
+      currency: stats?.defaultCurrency?.toUpperCase() || "GBP",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(cents / 100);
@@ -252,6 +254,8 @@ function MoneyHero() {
     });
   };
 
+  const lifetime = stats?.lifetime || { allTimeLeakedCents: 0, totalRecoveredCents: 0, totalGhostCount: 0 };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -262,7 +266,7 @@ function MoneyHero() {
         </div>
       </div>
       <p className="text-slate-500 text-sm -mt-4">
-        Last audit: <span className="font-mono text-slate-400">{formatDate(merchant.lastAuditAt)}</span>
+        Last audit: <span className="font-mono text-slate-400">{formatDate(stats?.lastAuditAt || merchant.lastAuditAt)}</span>
       </p>
 
       <div className="h-[200px] flex flex-col items-center justify-center text-center space-y-4">
@@ -276,7 +280,7 @@ function MoneyHero() {
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-leaked-hero"
           >
-            {formatCurrency(merchant.lifetime.allTimeLeakedCents)}
+            {statsLoading ? "..." : formatCurrency(lifetime.allTimeLeakedCents - lifetime.totalRecoveredCents)}
           </p>
         </div>
 
@@ -290,7 +294,7 @@ function MoneyHero() {
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-recovered-hero"
           >
-            {formatCurrency(merchant.lifetime.totalRecoveredCents)}
+            {statsLoading ? "..." : formatCurrency(lifetime.totalRecoveredCents)}
           </p>
         </div>
       </div>
@@ -303,7 +307,7 @@ function MoneyHero() {
             style={{ fontFamily: "JetBrains Mono, monospace" }}
             data-testid="text-ghost-count"
           >
-            {merchant.lifetime.totalGhostCount}
+            {statsLoading ? "..." : lifetime.totalGhostCount}
           </p>
         </div>
         <div className="text-center">
@@ -312,13 +316,13 @@ function MoneyHero() {
             className="text-xl text-white"
             style={{ fontFamily: "JetBrains Mono, monospace" }}
           >
-            {merchant.tierLimit}
+            {stats?.tierLimit || merchant.tierLimit}
           </p>
         </div>
         <div className="text-center">
           <p className="text-slate-500">Strategy</p>
           <p className="text-xl text-white capitalize">
-            {merchant.recoveryStrategy}
+            {stats?.recoveryStrategy || merchant.recoveryStrategy}
           </p>
         </div>
       </div>
@@ -327,9 +331,20 @@ function MoneyHero() {
 }
 
 function ForensicCharts() {
-  const { merchant } = useMerchant();
+  const { stats, isLoading } = useMerchantStats();
 
-  if (!merchant) return null;
+  if (isLoading || !stats) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-slate-900/50 border border-white/5 rounded-md p-6 h-64 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-slate-500" />
+        </div>
+        <div className="bg-slate-900/50 border border-white/5 rounded-md p-6 h-64 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-slate-500" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -338,7 +353,7 @@ function ForensicCharts() {
           <h3 className="text-sm font-medium text-slate-300">Historical Trend</h3>
           <span className="text-xs text-slate-500">Monthly breakdown</span>
         </div>
-        <MonthlyTrendChart data={merchant.monthlyTrend} />
+        <MonthlyTrendChart data={stats.monthlyTrend} />
       </div>
 
       <div className="bg-slate-900/50 border border-white/5 rounded-md p-6">
@@ -346,7 +361,7 @@ function ForensicCharts() {
           <h3 className="text-sm font-medium text-slate-300">30-Day Velocity</h3>
           <span className="text-xs text-slate-500">Daily activity</span>
         </div>
-        <DailyPulseChart data={merchant.dailyPulse} />
+        <DailyPulseChart data={stats.dailyPulse} />
       </div>
     </div>
   );
