@@ -49,13 +49,36 @@ Preferred communication style: Simple, everyday language.
 - **Webhook Infrastructure (The Handshake):** `invoice.paid` and `customer.subscription.updated` events from Stripe webhooks mark ghosts as "recovered" or "protected" and attribute recoveries.
 
 ### UI/UX Features
+
+#### Three-Tier Dashboard Layout
+- **Tier 1 - Global Command Header:** Consolidated header in MainLayout with Volume Guarded (left), Sentinel Status + Active Leakage + Refresh (center), Revenue Saved + Last Audit (right)
+- **Tier 2 - Diagnostic Trident:** 3-column War Room layout with Shadow Leakage card, Diagnostic DNA bar chart, and Leakage Forensics donut with PHANTOM Insight
+- **Tier 3 - Operational Floor:** Audit Proof conversion funnel + Vigilance Grid for ghost target management
+
+#### Core Pages
 - **MainLayout:** Collapsible sidebar with 3 pages: Dashboard (The Audit), Recoveries (The Action), Settings (The Control Plane)
-- **Global Header:** Displays `lastAuditAt` (relative time) and `grossInvoicedCents` (Volume Guarded)
-- **DashboardPage:** Displays overall health, revenue guarded, shadow leakage, and impending risk. Includes conversion funnel and recovery rate.
-- **RecoveriesPage:** Manages ghost targets with last action, recovery strategy, status, and attribution badges.
+- **DashboardPage:** Displays overall health, revenue guarded, shadow leakage, and impending risk via Diagnostic Trident and Audit Proof funnel
+- **RecoveriesPage:** Manages ghost targets with last action, recovery strategy, status, and attribution badges
+- **SettingsPage:** Contains Sentinel Arming Station (Auto-Pilot toggle) and Blueprint Editor
+
+#### Settings Features
+- **Sentinel Arming Station:** Toggle switch for enabling/disabling autonomous recovery email sending (Auto-Pilot mode). Requires support email to be configured.
+- **Blueprint Editor:** Real-time editor for customizing recovery email copy with:
+  - Editable fields: Subject, Greeting, Message Body, Button Text
+  - Live mobile preview with instant synchronization
+  - Placeholder highlighting for `{{customer_name}}` and `{{business_name}}`
+  - Visual feedback (purple ring) when editing corresponding preview sections
+  - "Reset to Default" button to restore proven Technical Bridge copy
+
+#### Components & Badges
 - **Centralized Badges:** `forensic-badges.tsx` with StrategyBadge, StatusBadge, CardBrandBadge, CountryBadge, AttributionBadge
-- **Modular Components:** `MoneyHero` (revenue metrics, leakage health), `ForensicCharts` (monthly/daily trends), `LeakageDonut` (category distribution).
-- **Social Sharing:** Allows sharing of individual recovery wins and overall integrity reports.
+- **Modular Components:** `MoneyHero` (revenue metrics, leakage health), `ForensicCharts` (monthly/daily trends), `LeakageDonut` (category distribution), `DiagnosticTrident` (3-column analysis panel)
+- **Social Sharing:** Allows sharing of individual recovery wins and overall integrity reports
+
+#### CSS Animations
+- `heartbeat-pulse`: 1.5s animation for engaged badges
+- `sentinel-armed`: 2s emerald glow for Auto-Pilot toggle when armed
+- `animate-pulse`: For Sentinel Active status indicator
 
 ## External Dependencies
 
