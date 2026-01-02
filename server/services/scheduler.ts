@@ -1,7 +1,6 @@
 // The Sentinel - Scheduled heartbeat jobs for autonomous operation
 import cron from "node-cron";
 import { storage } from "../storage";
-import { scanMerchant } from "./ghostHunter";
 import { processQueue } from "./pulseEngine";
 
 const LOCK_TTL_MINUTES = 60; // Lock expires after 60 minutes (allows lock stealing from stale processes)
@@ -26,10 +25,39 @@ async function logJobResult(result: JobResult): Promise<void> {
   }
 }
 
-async function runGhostHunterJob(forceSync: boolean = false): Promise<void> {
-  console.log(`[SENTINEL] Ghost Hunter heartbeat triggered (forceSync: ${forceSync})`);
+/**
+ * Dispatch scan jobs for all active merchants.
+ * This is a lightweight operation that just creates jobs - the worker processes them.
+ */
+async function dispatchMerchantScans(): Promise<{ jobsCreated: number; merchantIds: string[] }> {
+  const merchants = await storage.getAllMerchants();
+  const jobsCreated: string[] = [];
   
-  // Pre-flight: Attempt to acquire atomic lock
+  for (const merchant of merchants) {
+    try {
+      // Check if merchant already has a pending/processing job
+      // This prevents duplicate jobs from stacking up
+      const existingJob = await storage.getMerchantPendingJob(merchant.id);
+      if (existingJob) {
+        console.log(`[SENTINEL] Skipping merchant ${merchant.id} - job ${existingJob.id} already ${existingJob.status}`);
+        continue;
+      }
+      
+      const job = await storage.createScanJob(merchant.id);
+      jobsCreated.push(merchant.id);
+      console.log(`[SENTINEL] Created scan job ${job.id} for merchant ${merchant.id}`);
+    } catch (error: any) {
+      console.error(`[SENTINEL] Failed to create job for merchant ${merchant.id}:`, error.message);
+    }
+  }
+  
+  return { jobsCreated: jobsCreated.length, merchantIds: jobsCreated };
+}
+
+async function runGhostHunterJob(): Promise<void> {
+  console.log("[SENTINEL] Ghost Hunter heartbeat triggered");
+  
+  // Pre-flight: Attempt to acquire atomic lock (prevents duplicate dispatches)
   const lockResult = await storage.acquireJobLock("ghost_hunter", LOCK_TTL_MINUTES);
   
   if (!lockResult) {
@@ -44,14 +72,8 @@ async function runGhostHunterJob(forceSync: boolean = false): Promise<void> {
   
   const { holderId, wasStolen } = lockResult;
   
-  // Log lock acquisition status
   if (wasStolen) {
     console.log(`[SENTINEL] Ghost Hunter lock STOLEN from stale process (holderId: ${holderId})`);
-    await logJobResult({
-      jobName: "ghost_hunter",
-      status: "success",
-      details: `Lock stolen from stale process, starting fresh scan`,
-    });
   } else {
     console.log(`[SENTINEL] Ghost Hunter lock acquired (holderId: ${holderId})`);
   }
@@ -59,76 +81,30 @@ async function runGhostHunterJob(forceSync: boolean = false): Promise<void> {
   const startTime = Date.now();
   
   try {
-    const merchants = await storage.getAllMerchants();
-    
-    if (merchants.length === 0) {
-      await logJobResult({
-        jobName: "ghost_hunter",
-        status: "success",
-        details: "No merchants to scan",
-      });
-      return;
-    }
-    
-    let totalGhosts = 0;
-    let totalOraclePoints = 0;
-    let totalRecords = 0;
-    let peakRssMb = 0;
-    let totalUpsertMs = 0;
-    let totalUpsertCount = 0;
-    const errors: string[] = [];
-    
-    for (const merchant of merchants) {
-      try {
-        const result = await scanMerchant(merchant.id, forceSync);
-        totalGhosts += result.ghostsFound.length;
-        totalOraclePoints += result.oracleDataPoints;
-        
-        // Aggregate telemetry from all merchant scans
-        if (result.telemetry) {
-          totalRecords += result.telemetry.recordsProcessed;
-          if (result.telemetry.peakRssMb > peakRssMb) {
-            peakRssMb = result.telemetry.peakRssMb;
-          }
-          totalUpsertMs += result.telemetry.totalUpsertMs;
-          totalUpsertCount += result.telemetry.upsertCount;
-        }
-        
-        if (result.errors.length > 0) {
-          errors.push(...result.errors.map(e => `${merchant.id}: ${e}`));
-        }
-      } catch (error: any) {
-        errors.push(`${merchant.id}: ${error.message}`);
-      }
-    }
+    // Dispatch scan jobs for all merchants (non-blocking)
+    const { jobsCreated, merchantIds } = await dispatchMerchantScans();
     
     const duration = Date.now() - startTime;
-    const avgUpsertMs = totalUpsertCount > 0 
-      ? Math.round(totalUpsertMs / totalUpsertCount * 100) / 100 
-      : 0;
-    
-    // DIAGNOSTIC SHELL: Final summary with telemetry
-    const details = `Scanned ${merchants.length} merchants, ${totalRecords} records, found ${totalGhosts} ghosts in ${duration}ms | Peak RSS: ${peakRssMb}MB | Avg UPSERT: ${avgUpsertMs}ms`;
+    const details = `Dispatched ${jobsCreated} scan jobs in ${duration}ms. Worker will process asynchronously.`;
     
     await logJobResult({
       jobName: "ghost_hunter",
-      status: errors.length === 0 ? "success" : "failure",
+      status: "success",
       details,
-      errorMessage: errors.length > 0 ? errors.join("; ") : undefined,
     });
     
     console.log(`[SENTINEL] Ghost Hunter complete: ${details}`);
     
   } catch (error: any) {
-    console.error("[SENTINEL] Ghost Hunter failed:", error);
+    console.error("[SENTINEL] Ghost Hunter dispatch failed:", error);
     await logJobResult({
       jobName: "ghost_hunter",
       status: "failure",
-      details: "Job execution failed",
+      details: "Job dispatch failed",
       errorMessage: error.message,
     });
   } finally {
-    // Identity-safe release: only release if we still own the lock
+    // Identity-safe release
     const released = await storage.releaseJobLock("ghost_hunter", holderId);
     if (released) {
       console.log(`[SENTINEL] Ghost Hunter lock released (holderId: ${holderId})`);
@@ -174,7 +150,7 @@ async function runPulseEngineJob(): Promise<void> {
     const result = await processQueue();
     const duration = Date.now() - startTime;
     
-    const details = `Processed ${result.ghostsProcessed} ghosts, sent ${result.emailsSent} emails, ${result.emailsFailed} failed in ${duration}ms`;
+    const details = `Processed ${result.targetsProcessed} targets, sent ${result.emailsSent} emails, ${result.emailsFailed} failed in ${duration}ms`;
     
     await logJobResult({
       jobName: "pulse_engine",

@@ -345,6 +345,7 @@ export interface IStorage {
   getScanJob(id: number): Promise<ScanJob | undefined>;
   updateScanJob(id: number, updates: { status?: string; progress?: number; error?: string | null; completedAt?: Date | null }): Promise<ScanJob | undefined>;
   pickNextJob(): Promise<ScanJob | undefined>;
+  getMerchantPendingJob(merchantId: string): Promise<ScanJob | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1504,6 +1505,25 @@ export class DatabaseStorage implements IStorage {
       completedAt: row.completed_at ? new Date(row.completed_at) : null,
       error: row.error,
     };
+  }
+
+  async getMerchantPendingJob(merchantId: string): Promise<ScanJob | undefined> {
+    // Check if merchant has any pending or processing job
+    const [job] = await db
+      .select()
+      .from(scanJobs)
+      .where(
+        and(
+          eq(scanJobs.merchantId, merchantId),
+          or(
+            eq(scanJobs.status, "pending"),
+            eq(scanJobs.status, "processing")
+          )
+        )
+      )
+      .orderBy(desc(scanJobs.createdAt))
+      .limit(1);
+    return job || undefined;
   }
 }
 
