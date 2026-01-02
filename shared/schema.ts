@@ -250,6 +250,26 @@ export const cronLocks = pgTable("cron_locks", {
 
 export type CronLock = typeof cronLocks.$inferSelect;
 
+// Scan Jobs table - database-backed job queue for async scanning
+// Prevents HTTP timeouts on serverless by decoupling initiation from execution
+export const scanJobs = pgTable("scan_jobs", {
+  id: serial("id").primaryKey(),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
+  status: text("status").default("pending").notNull(), // 'pending', 'processing', 'completed', 'failed'
+  progress: integer("progress").default(0).notNull(), // 0-100
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  error: text("error"),
+});
+
+export const insertScanJobSchema = createInsertSchema(scanJobs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertScanJob = z.infer<typeof insertScanJobSchema>;
+export type ScanJob = typeof scanJobs.$inferSelect;
+
 // ============================================================================
 // DRIZZLE RELATIONS - Define table relationships for type-safe joins
 // ============================================================================

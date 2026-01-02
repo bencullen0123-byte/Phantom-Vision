@@ -1,4 +1,4 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
@@ -339,6 +339,12 @@ export interface IStorage {
   // Cron Locks (Atomic Job Locking)
   acquireJobLock(jobName: string, ttlMinutes: number): Promise<{ holderId: string; wasStolen: boolean } | null>;
   releaseJobLock(jobName: string, holderId: string): Promise<boolean>;
+  
+  // Scan Jobs (Async Job Queue)
+  createScanJob(merchantId: string): Promise<ScanJob>;
+  getScanJob(id: number): Promise<ScanJob | undefined>;
+  updateScanJob(id: number, updates: { status?: string; progress?: number; error?: string | null; completedAt?: Date | null }): Promise<ScanJob | undefined>;
+  pickNextJob(): Promise<ScanJob | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1443,6 +1449,61 @@ export class DatabaseStorage implements IStorage {
       default:
         return "Strategy: Recovery Pulse dispatched. Email sequence initiated.";
     }
+  }
+
+  // ============================================================================
+  // SCAN JOBS - Async Job Queue for Background Processing
+  // ============================================================================
+
+  async createScanJob(merchantId: string): Promise<ScanJob> {
+    const [job] = await db
+      .insert(scanJobs)
+      .values({ merchantId, status: "pending", progress: 0 })
+      .returning();
+    return job;
+  }
+
+  async getScanJob(id: number): Promise<ScanJob | undefined> {
+    const [job] = await db.select().from(scanJobs).where(eq(scanJobs.id, id));
+    return job || undefined;
+  }
+
+  async updateScanJob(id: number, updates: { status?: string; progress?: number; error?: string | null; completedAt?: Date | null }): Promise<ScanJob | undefined> {
+    const [updated] = await db
+      .update(scanJobs)
+      .set(updates)
+      .where(eq(scanJobs.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async pickNextJob(): Promise<ScanJob | undefined> {
+    // Atomic: Find oldest pending job and mark as processing in one operation
+    const result = await db.execute(sql`
+      UPDATE scan_jobs
+      SET status = 'processing'
+      WHERE id = (
+        SELECT id FROM scan_jobs
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *
+    `);
+    
+    const row = result.rows[0] as any;
+    if (!row) return undefined;
+    
+    return {
+      id: row.id,
+      merchantId: row.merchant_id,
+      status: row.status,
+      progress: row.progress,
+      createdAt: new Date(row.created_at),
+      completedAt: row.completed_at ? new Date(row.completed_at) : null,
+      error: row.error,
+    };
   }
 }
 
