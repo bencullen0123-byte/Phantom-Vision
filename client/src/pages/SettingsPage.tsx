@@ -11,13 +11,15 @@ import {
   CheckCircle,
   RefreshCw,
   CreditCard,
-  Zap
+  Zap,
+  RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
@@ -37,77 +39,194 @@ interface BlueprintCanvasProps {
   supportEmail: string;
 }
 
+const DEFAULT_BLUEPRINT = {
+  subject: "Quick fix needed for your payment",
+  heading: "Hi {{customer_name}},",
+  body: "We've detected a technical friction point with your recent payment for {{business_name}}. This often happens when your bank requires additional verification. A quick confirmation should resolve this in seconds.",
+  ctaText: "Complete Verification",
+};
+
+function renderWithPlaceholders(text: string, businessName: string): JSX.Element {
+  const parts = text.split(/({{[^}]+}})/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part === '{{customer_name}}') {
+          return <span key={i} className="font-medium text-purple-600 bg-purple-50 px-0.5 rounded">Alex</span>;
+        }
+        if (part === '{{business_name}}') {
+          return <span key={i} className="font-medium text-gray-900">{businessName || 'Your Business'}</span>;
+        }
+        if (part.startsWith('{{') && part.endsWith('}}')) {
+          return <span key={i} className="font-medium text-purple-600 bg-purple-50 px-0.5 rounded">{part}</span>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 function BlueprintCanvas({ businessName, brandColor, supportEmail }: BlueprintCanvasProps) {
   const displayName = businessName || 'Your Business Name';
   const displayEmail = supportEmail || 'support@yourbusiness.com';
   
+  const [blueprint, setBlueprint] = useState({
+    subject: DEFAULT_BLUEPRINT.subject,
+    heading: DEFAULT_BLUEPRINT.heading,
+    body: DEFAULT_BLUEPRINT.body,
+    ctaText: DEFAULT_BLUEPRINT.ctaText,
+  });
+  
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  
+  const handleReset = () => {
+    setBlueprint({ ...DEFAULT_BLUEPRINT });
+  };
+  
+  const isModified = 
+    blueprint.subject !== DEFAULT_BLUEPRINT.subject ||
+    blueprint.heading !== DEFAULT_BLUEPRINT.heading ||
+    blueprint.body !== DEFAULT_BLUEPRINT.body ||
+    blueprint.ctaText !== DEFAULT_BLUEPRINT.ctaText;
+  
   return (
     <Card className="bg-slate-900/50 border-white/5">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
-          <Mail className="w-4 h-4 text-purple-400" />
-          Live Recovery Blueprint
+        <CardTitle className="text-sm font-medium text-slate-300 flex items-center justify-between gap-4 flex-wrap">
+          <span className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-purple-400" />
+            Blueprint Editor
+          </span>
+          {isModified && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReset}
+              className="text-xs text-slate-400 h-7"
+              data-testid="button-reset-blueprint"
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />
+              Reset to Default
+            </Button>
+          )}
         </CardTitle>
-        <p className="text-xs text-slate-500 mt-1">Technical Bridge Strategy Preview</p>
+        <p className="text-xs text-slate-500 mt-1">Edit your Technical Bridge recovery message</p>
       </CardHeader>
-      <CardContent>
-        <div className="relative mx-auto" style={{ maxWidth: '320px' }}>
-          <div className="bg-slate-800 rounded-3xl p-2 border-2 border-slate-700 shadow-xl">
-            <div className="bg-slate-700 rounded-full w-20 h-1.5 mx-auto mb-2" />
-            
-            <div className="rounded-2xl overflow-hidden border border-slate-600">
-              <div className="bg-slate-100 px-3 py-2 border-b border-slate-300">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500 w-12">From:</span>
-                    <span className="text-slate-700 font-medium truncate">{displayName}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500 w-12">Reply-To:</span>
-                    <span className="text-purple-600 font-medium truncate">{displayEmail}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500 w-12">Subject:</span>
-                    <span className="text-slate-800 font-semibold truncate">Quick fix needed for your payment</span>
+      <CardContent className="space-y-4">
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-400">Subject Line</Label>
+            <Input
+              value={blueprint.subject}
+              onChange={(e) => setBlueprint({ ...blueprint, subject: e.target.value })}
+              onFocus={() => setFocusedField('subject')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Email subject..."
+              className="bg-slate-800 border-white/10 text-white text-sm h-8"
+              data-testid="input-blueprint-subject"
+            />
+          </div>
+          
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-400">
+              Greeting
+              <span className="text-purple-400 ml-1">(use {"{{customer_name}}"})</span>
+            </Label>
+            <Input
+              value={blueprint.heading}
+              onChange={(e) => setBlueprint({ ...blueprint, heading: e.target.value })}
+              onFocus={() => setFocusedField('heading')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Hi {{customer_name}},"
+              className="bg-slate-800 border-white/10 text-white text-sm h-8"
+              data-testid="input-blueprint-heading"
+            />
+          </div>
+          
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-400">
+              Message Body
+              <span className="text-purple-400 ml-1">(use {"{{business_name}}"})</span>
+            </Label>
+            <Textarea
+              value={blueprint.body}
+              onChange={(e) => setBlueprint({ ...blueprint, body: e.target.value })}
+              onFocus={() => setFocusedField('body')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Your recovery message..."
+              className="bg-slate-800 border-white/10 text-white text-sm min-h-[80px] resize-none"
+              data-testid="input-blueprint-body"
+            />
+          </div>
+          
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-400">Button Text</Label>
+            <Input
+              value={blueprint.ctaText}
+              onChange={(e) => setBlueprint({ ...blueprint, ctaText: e.target.value })}
+              onFocus={() => setFocusedField('cta')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Complete Verification"
+              className="bg-slate-800 border-white/10 text-white text-sm h-8"
+              data-testid="input-blueprint-cta"
+            />
+          </div>
+        </div>
+        
+        <div className="border-t border-white/5 pt-4">
+          <p className="text-xs text-slate-500 mb-3 text-center">Live Preview</p>
+          <div className="relative mx-auto" style={{ maxWidth: '280px' }}>
+            <div className="bg-slate-800 rounded-3xl p-1.5 border-2 border-slate-700 shadow-xl">
+              <div className="bg-slate-700 rounded-full w-16 h-1 mx-auto mb-1.5" />
+              
+              <div className="rounded-2xl overflow-hidden border border-slate-600">
+                <div className={`bg-slate-100 px-2 py-1.5 border-b border-slate-300 transition-all ${focusedField === 'subject' ? 'ring-2 ring-purple-500 ring-inset' : ''}`}>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-500 w-10">From:</span>
+                      <span className="text-slate-700 font-medium truncate">{displayName}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-500 w-10">Reply-To:</span>
+                      <span className="text-purple-600 font-medium truncate">{displayEmail}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-500 w-10">Subject:</span>
+                      <span className="text-slate-800 font-semibold truncate">{blueprint.subject}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div 
-                className="py-3 px-4 text-center"
-                style={{ backgroundColor: brandColor }}
-              >
-                <h3 className="text-white font-semibold text-sm" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
-                  {displayName}
-                </h3>
-              </div>
-
-              <div className="bg-white p-4 space-y-3">
-                <p className="text-xs text-gray-600">
-                  Hi <span className="font-medium text-gray-900">Alex</span>,
-                </p>
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  We've detected a <span className="font-medium text-purple-700">technical friction point</span> with 
-                  your recent payment for <span className="font-medium text-gray-900">{displayName}</span>.
-                </p>
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  This often happens when your bank requires additional verification. 
-                  A quick confirmation should resolve this in seconds.
-                </p>
-                <div className="pt-2">
-                  <button 
-                    className="w-full px-4 py-2.5 rounded-md text-white text-xs font-medium shadow-sm"
-                    style={{ backgroundColor: brandColor }}
-                  >
-                    Complete Verification
-                  </button>
+                <div 
+                  className="py-2 px-3 text-center"
+                  style={{ backgroundColor: brandColor }}
+                >
+                  <h3 className="text-white font-semibold text-[11px]" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>
+                    {displayName}
+                  </h3>
                 </div>
-                <p className="text-xs text-gray-400 text-center pt-1">
-                  Secure payment powered by Stripe
-                </p>
-              </div>
 
-              <div className="bg-gray-100 py-2 px-4 text-center border-t border-gray-200">
+                <div className="bg-white p-3 space-y-2">
+                  <p className={`text-[10px] text-gray-600 transition-all ${focusedField === 'heading' ? 'ring-2 ring-purple-500 rounded px-1 -mx-1' : ''}`}>
+                    {renderWithPlaceholders(blueprint.heading, displayName)}
+                  </p>
+                  <p className={`text-[10px] text-gray-600 leading-relaxed transition-all ${focusedField === 'body' ? 'ring-2 ring-purple-500 rounded px-1 -mx-1' : ''}`}>
+                    {renderWithPlaceholders(blueprint.body, displayName)}
+                  </p>
+                  <div className={`pt-1.5 transition-all ${focusedField === 'cta' ? 'ring-2 ring-purple-500 rounded' : ''}`}>
+                    <button 
+                      className="w-full px-3 py-2 rounded-md text-white text-[10px] font-medium shadow-sm"
+                      style={{ backgroundColor: brandColor }}
+                    >
+                      {blueprint.ctaText}
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-gray-400 text-center pt-0.5">
+                    Secure payment powered by Stripe
+                  </p>
+                </div>
+
+                <div className="bg-gray-100 py-2 px-3 text-center border-t border-gray-200">
                 <p className="text-xs text-gray-500">
                   Need help? Reply to this email.
                 </p>
