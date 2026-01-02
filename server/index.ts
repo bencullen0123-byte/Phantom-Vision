@@ -6,6 +6,7 @@ import { createServer } from "http";
 import cookieParser from "cookie-parser";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
+import { startJobWorker } from "./services/ghostHunter";
 
 const app = express();
 const httpServer = createServer(app);
@@ -126,6 +127,9 @@ app.use((req, res, next) => {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
+
+  // Start the background job worker for async scan processing
+  startJobWorker();
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.

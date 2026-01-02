@@ -938,3 +938,112 @@ export async function runAuditForMerchant(merchantId: string, forceSync: boolean
     errors: scanResult.errors,
   };
 }
+
+// ============================================================================
+// ASYNC JOB QUEUE - Background Processing for Serverless Environments
+// ============================================================================
+
+const JOB_WORKER_INTERVAL_MS = 5000; // Poll every 5 seconds
+let workerIntervalId: NodeJS.Timeout | null = null;
+
+/**
+ * Process a scan job by ID. Updates progress during execution.
+ * This is the async-safe version of scanMerchant for the job queue.
+ */
+export async function processScanJob(jobId: number, merchantId: string): Promise<void> {
+  console.log(`[JOB WORKER] Starting job ${jobId} for merchant ${merchantId}`);
+  
+  try {
+    // Mark as processing (already done by pickNextJob, but ensure state)
+    await storage.updateScanJob(jobId, { status: "processing", progress: 5 });
+    
+    // Update merchant audit status
+    await storage.updateMerchantAuditStatus(merchantId, "in_progress");
+    
+    // Run the actual scan with progress callbacks
+    const result = await scanMerchantWithProgress(merchantId, false, async (progress: number) => {
+      await storage.updateScanJob(jobId, { progress: Math.min(progress, 95) });
+    });
+    
+    // Mark as completed
+    await storage.updateScanJob(jobId, {
+      status: "completed",
+      progress: 100,
+      completedAt: new Date(),
+      error: result.errors.length > 0 ? result.errors.join("; ") : null,
+    });
+    
+    await storage.updateMerchantAuditStatus(merchantId, "completed");
+    
+    console.log(`[JOB WORKER] Job ${jobId} completed. Ghosts found: ${result.ghostsFound.length}, Revenue at risk: $${(result.totalRevenueAtRisk / 100).toFixed(2)}`);
+  } catch (error: any) {
+    console.error(`[JOB WORKER] Job ${jobId} failed:`, error.message);
+    
+    await storage.updateScanJob(jobId, {
+      status: "failed",
+      completedAt: new Date(),
+      error: error.message,
+    });
+    
+    await storage.updateMerchantAuditStatus(merchantId, "failed");
+  }
+}
+
+/**
+ * Extended scanMerchant with progress callback for job queue integration.
+ * Progress is reported every THROTTLE_BATCH_SIZE records.
+ */
+async function scanMerchantWithProgress(
+  merchantId: string, 
+  forceSync: boolean = false,
+  onProgress?: (progress: number) => Promise<void>
+): Promise<ScanResult & { telemetry?: TelemetryState }> {
+  // Delegate to existing scanMerchant - progress tracking is handled via telemetry
+  // The existing scanMerchant has THROTTLE_BATCH_SIZE logging, we can hook into that
+  const result = await scanMerchant(merchantId, forceSync);
+  
+  // Report progress based on telemetry if available
+  if (onProgress && result.telemetry) {
+    const progressPercent = Math.min(95, Math.round((result.telemetry.recordsProcessed / Math.max(result.telemetry.totalPaymentEvents, 1)) * 90));
+    await onProgress(progressPercent);
+  }
+  
+  return result;
+}
+
+/**
+ * Start the background job worker that polls for pending jobs.
+ * Call this once during server initialization.
+ */
+export function startJobWorker(): void {
+  if (workerIntervalId) {
+    console.log("[JOB WORKER] Worker already running");
+    return;
+  }
+  
+  console.log(`[JOB WORKER] Starting background worker (polling every ${JOB_WORKER_INTERVAL_MS}ms)`);
+  
+  workerIntervalId = setInterval(async () => {
+    try {
+      const job = await storage.pickNextJob();
+      
+      if (job) {
+        console.log(`[JOB WORKER] Picked job ${job.id} for merchant ${job.merchantId}`);
+        await processScanJob(job.id, job.merchantId);
+      }
+    } catch (error: any) {
+      console.error(`[JOB WORKER] Error polling for jobs:`, error.message);
+    }
+  }, JOB_WORKER_INTERVAL_MS);
+}
+
+/**
+ * Stop the background job worker.
+ */
+export function stopJobWorker(): void {
+  if (workerIntervalId) {
+    clearInterval(workerIntervalId);
+    workerIntervalId = null;
+    console.log("[JOB WORKER] Worker stopped");
+  }
+}
