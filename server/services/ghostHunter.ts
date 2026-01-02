@@ -851,6 +851,12 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         grossInvoicedCents: result.grossInvoicedCents,
       });
       console.log(`[GHOST HUNTER] Audit timestamp updated, currency: ${detectedCurrency?.toUpperCase() || 'GBP'}, grossInvoiced: $${(result.grossInvoicedCents / 100).toFixed(2)}`);
+      
+      // AUDIT PROOF: Atomically increment total vetted count
+      if (totalInvoicesScanned > 0) {
+        await storage.incrementTotalVettedCount(merchantId, totalInvoicesScanned);
+        console.log(`[GHOST HUNTER] Total vetted count incremented by ${totalInvoicesScanned}`);
+      }
     } catch (error: any) {
       result.errors.push(`Failed to update merchant: ${error.message}`);
       console.error(`[GHOST HUNTER] Merchant update error:`, error);

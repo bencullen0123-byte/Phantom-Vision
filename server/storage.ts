@@ -240,6 +240,7 @@ export interface IStorage {
   incrementMerchantProtection(id: string, amountCents: number): Promise<Merchant | undefined>;
   incrementMerchantGrossInvoiced(id: string, amountCents: number): Promise<Merchant | undefined>;
   incrementMerchantLeakedCents(id: string, amountCents: number): Promise<Merchant | undefined>;
+  incrementTotalVettedCount(id: string, count: number): Promise<Merchant | undefined>;
   getMerchantStats(merchantId: string): Promise<MerchantStats>;
   updateMerchantShadowRevenue(id: string, data: ShadowRevenueUpdate): Promise<Merchant | undefined>;
   updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined>;
@@ -357,6 +358,17 @@ export class DatabaseStorage implements IStorage {
       .update(merchants)
       .set({
         allTimeLeakedCents: sql`${merchants.allTimeLeakedCents} + ${amountCents}`,
+      })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async incrementTotalVettedCount(id: string, count: number): Promise<Merchant | undefined> {
+    const [updated] = await db
+      .update(merchants)
+      .set({
+        totalVettedCount: sql`${merchants.totalVettedCount} + ${count}`,
       })
       .where(eq(merchants.id, id))
       .returning();
