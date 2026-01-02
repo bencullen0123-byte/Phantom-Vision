@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, bigint, boolean } from "drizzle-orm/pg-core";
+import { sql, relations } from "drizzle-orm";
+import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -45,6 +45,30 @@ export const insertMerchantSchema = createInsertSchema(merchants).omit({
 export type InsertMerchant = z.infer<typeof insertMerchantSchema>;
 export type Merchant = typeof merchants.$inferSelect;
 
+// PII Vault table - GDPR-compliant segregated PII storage
+// Decouples personal data from financial ledger for "Right to be Forgotten" compliance
+// while respecting tax retention laws on transaction records
+export const piiVault = pgTable("pii_vault", {
+  id: serial("id").primaryKey(),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
+  emailCiphertext: text("email_ciphertext").notNull(),
+  emailIv: text("email_iv").notNull(),
+  emailTag: text("email_tag").notNull(),
+  nameCiphertext: text("name_ciphertext"),
+  nameIv: text("name_iv"),
+  nameTag: text("name_tag"),
+  keyId: text("key_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertPiiVaultSchema = createInsertSchema(piiVault).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPiiVault = z.infer<typeof insertPiiVaultSchema>;
+export type PiiVault = typeof piiVault.$inferSelect;
+
 // Ghost targets table - stores transient PII for recovery
 // Status values: 'pending', 'recovered', 'exhausted', 'impending'
 // - 'pending': ghost user with failed payment requiring recovery
@@ -53,14 +77,18 @@ export type Merchant = typeof merchants.$inferSelect;
 export const ghostTargets = pgTable("ghost_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
-  // Encrypted email fields (AES-256-GCM)
-  emailCiphertext: text("email_ciphertext").notNull(),
-  emailIv: text("email_iv").notNull(),
-  emailTag: text("email_tag").notNull(),
-  // Encrypted customer name fields (AES-256-GCM)
-  customerNameCiphertext: text("customer_name_ciphertext").notNull(),
-  customerNameIv: text("customer_name_iv").notNull(),
-  customerNameTag: text("customer_name_tag").notNull(),
+  // PII Vault reference (GDPR-compliant segregated storage)
+  piiVaultId: integer("pii_vault_id").references(() => piiVault.id),
+  // DEPRECATED: Legacy encrypted email fields - use piiVaultId instead
+  // Retained for data migration, will be removed in future release
+  emailCiphertext: text("email_ciphertext"),
+  emailIv: text("email_iv"),
+  emailTag: text("email_tag"),
+  // DEPRECATED: Legacy encrypted customer name fields - use piiVaultId instead
+  // Retained for data migration, will be removed in future release
+  customerNameCiphertext: text("customer_name_ciphertext"),
+  customerNameIv: text("customer_name_iv"),
+  customerNameTag: text("customer_name_tag"),
   amount: integer("amount").notNull(),
   invoiceId: text("invoice_id").notNull().unique(),
   discoveredAt: timestamp("discovered_at").defaultNow().notNull(),
@@ -221,3 +249,46 @@ export const cronLocks = pgTable("cron_locks", {
 });
 
 export type CronLock = typeof cronLocks.$inferSelect;
+
+// ============================================================================
+// DRIZZLE RELATIONS - Define table relationships for type-safe joins
+// ============================================================================
+
+// Merchant relations
+export const merchantsRelations = relations(merchants, ({ many }) => ({
+  ghostTargets: many(ghostTargets),
+  piiVaultEntries: many(piiVault),
+  liquidityOracle: many(liquidityOracle),
+}));
+
+// PII Vault relations (One-to-One with ghost_targets, Many-to-One with merchants)
+export const piiVaultRelations = relations(piiVault, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [piiVault.merchantId],
+    references: [merchants.id],
+  }),
+  ghostTarget: one(ghostTargets, {
+    fields: [piiVault.id],
+    references: [ghostTargets.piiVaultId],
+  }),
+}));
+
+// Ghost targets relations
+export const ghostTargetsRelations = relations(ghostTargets, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [ghostTargets.merchantId],
+    references: [merchants.id],
+  }),
+  piiVault: one(piiVault, {
+    fields: [ghostTargets.piiVaultId],
+    references: [piiVault.id],
+  }),
+}));
+
+// Liquidity oracle relations
+export const liquidityOracleRelations = relations(liquidityOracle, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [liquidityOracle.merchantId],
+    references: [merchants.id],
+  }),
+}));
