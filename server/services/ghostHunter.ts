@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import Decimal from "decimal.js";
 import { storage } from "../storage";
 import { decrypt, vaultDiagnostic, redactEmail } from "../utils/crypto";
-import type { Merchant } from "@shared/schema";
+import type { Merchant, InsertGhostTarget } from "@shared/schema";
 
 // Diagnostic Shell Constants
 const THROTTLE_BATCH_SIZE = 50;        // Log telemetry every N records
@@ -10,6 +10,9 @@ const THROTTLE_DELAY_MS = 200;         // Delay after every THROTTLE_BATCH_SIZE 
 const RATE_LIMIT_RETRY_MS = 2000;      // 2-second sleep on rate limit
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+
+// Atomic Batch Processing Constants (Task 3.2)
+const ATOMIC_BATCH_SIZE = 50;          // Commit ghosts in batches of 50 for atomicity
 
 // Telemetry State
 interface TelemetryState {
@@ -588,6 +591,32 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   // Overflow Rule: Track if we hit tier limit mid-scan
   let tierLimitReached = false;
   
+  // ATOMIC BATCH PROCESSING (Task 3.2): Buffer ghost targets for transactional commits
+  const ghostBuffer: InsertGhostTarget[] = [];
+  let totalBatchesFlushed = 0;
+  
+  // Helper: Flush ghost buffer atomically
+  const flushGhostBuffer = async (): Promise<void> => {
+    if (ghostBuffer.length === 0) return;
+    
+    const batchStartTime = Date.now();
+    const batchSize = ghostBuffer.length;
+    
+    try {
+      await storage.batchUpsertGhostTargets(ghostBuffer);
+      totalBatchesFlushed++;
+      const batchMs = Date.now() - batchStartTime;
+      console.log(`[GHOST HUNTER] Atomic batch ${totalBatchesFlushed} committed: ${batchSize} ghosts in ${batchMs}ms`);
+      
+      // Clear buffer after successful commit
+      ghostBuffer.length = 0;
+    } catch (error: any) {
+      // Entire batch rolled back automatically by transaction
+      console.error(`[GHOST HUNTER] ATOMIC BATCH FAILED: ${batchSize} ghosts rolled back - ${error.message}`);
+      throw error; // Propagate to fail the scan
+    }
+  };
+  
   // Multi-Currency Detection: capture currency from first invoice
   let detectedCurrency: string | undefined;
 
@@ -702,9 +731,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 amount,
               });
 
-              // UPSERT with latency tracking
-              const upsertStart = Date.now();
-              await storage.upsertGhostTarget({
+              // ATOMIC BATCH PROCESSING: Buffer ghost for transactional commit
+              ghostBuffer.push({
                 merchantId,
                 email,
                 customerName,
@@ -716,19 +744,22 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 declineType,
                 failureCode,
                 failureMessage,
-                // ML metadata (non-PII, queryable for revenue intelligence)
                 cardBrand: mlMetadata.cardBrand,
                 cardFunding: mlMetadata.cardFunding,
                 countryCode: mlMetadata.countryCode,
                 requires3ds: mlMetadata.requires3ds,
                 stripeErrorCode: mlMetadata.stripeErrorCode,
                 originalInvoiceDate: mlMetadata.originalInvoiceDate,
-                // Recovery Strategy Selector (Sprint 2.3)
                 recoveryStrategy,
               });
-              const upsertMs = Date.now() - upsertStart;
-              telemetry.totalUpsertMs += upsertMs;
               telemetry.upsertCount++;
+              
+              // Flush when buffer reaches ATOMIC_BATCH_SIZE
+              if (ghostBuffer.length >= ATOMIC_BATCH_SIZE) {
+                const flushStart = Date.now();
+                await flushGhostBuffer();
+                telemetry.totalUpsertMs += Date.now() - flushStart;
+              }
 
               result.ghostsFound.push({
                 email,
@@ -748,9 +779,9 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 remainingCapacity--;
               }
 
-              // Log ghost with failure reason
+              // Log ghost with failure reason (batched, no individual timing)
               const reasonLog = failureCode ? ` - Reason: ${failureCode}` : '';
-              console.log(`[GHOST HUNTER] Found Ghost: ${redactEmail(email)}${reasonLog}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
+              console.log(`[GHOST HUNTER] Buffered Ghost: ${redactEmail(email)}${reasonLog}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [buffer: ${ghostBuffer.length}/${ATOMIC_BATCH_SIZE}]`);
             } else {
               telemetry.subscriptionFailed++;
               console.log('[FORENSIC] Invoice ' + invoice.id + ' failed subscription check for customer ' + customerId);
@@ -801,6 +832,18 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     }
   }
 
+  // ATOMIC BATCH PROCESSING: Final flush for remaining ghosts in buffer
+  if (ghostBuffer.length > 0) {
+    try {
+      const flushStart = Date.now();
+      await flushGhostBuffer();
+      telemetry.totalUpsertMs += Date.now() - flushStart;
+    } catch (error: any) {
+      result.errors.push(`Final batch commit failed: ${error.message}`);
+      console.error(`[GHOST HUNTER] Final batch commit failed:`, error);
+    }
+  }
+
   // Check if scan completed without breaking due to errors
   const scanCompletedSuccessfully = result.errors.length === 0;
 
@@ -814,7 +857,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         detectedCurrency = impendingCurrency;
       }
       
-      // Upsert impending ghosts
+      // Buffer impending ghosts for atomic commit
+      const impendingBuffer: InsertGhostTarget[] = [];
       for (const risk of risks) {
         const purgeAt = new Date();
         purgeAt.setDate(purgeAt.getDate() + 90);
@@ -826,18 +870,25 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
           amount: risk.amount,
         });
         
-        await storage.upsertGhostTarget({
+        impendingBuffer.push({
           merchantId,
           email: risk.email,
           customerName: risk.customerName,
           amount: risk.amount,
-          invoiceId: `impending_${risk.subscriptionId}`, // Use subscription ID as unique identifier
+          invoiceId: `impending_${risk.subscriptionId}`,
           purgeAt,
           status: "impending",
           failureReason: `card_expiring_${risk.expMonth}_${risk.expYear}`,
           declineType: null,
           recoveryStrategy,
         });
+      }
+      
+      // Flush impending ghosts atomically
+      if (impendingBuffer.length > 0) {
+        const impendingStart = Date.now();
+        await storage.batchUpsertGhostTargets(impendingBuffer);
+        console.log(`[GHOST HUNTER] Impending batch committed: ${impendingBuffer.length} ghosts in ${Date.now() - impendingStart}ms`);
       }
       
       // Impending leakage now calculated live from ghost_targets via getHistoricalRevenueStats
