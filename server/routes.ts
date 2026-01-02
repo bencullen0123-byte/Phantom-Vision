@@ -280,9 +280,9 @@ export async function registerRoutes(
     }
   });
 
-  // Audit endpoint - creates a scan job for async processing (secured by session)
+  // Scan endpoint - creates a scan job for async processing (secured by session)
   // Returns 202 Accepted immediately with job ID for status polling
-  app.post("/api/audit/run", requireMerchant, async (req: Request, res: Response) => {
+  app.post("/api/scan", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
     const forceSync = req.body?.forceSync === true;
     
