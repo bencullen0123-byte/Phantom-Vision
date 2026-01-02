@@ -87,6 +87,41 @@ export function runSecurityCheck(): void {
 }
 
 /**
+ * Log Sanitization: Redact PII for safe logging
+ * Transforms "user@example.com" to "use***@***.com"
+ * Preserves debugging utility while preventing PII exposure in logs
+ */
+export function redactEmail(email: string): string {
+  if (!email || typeof email !== 'string') return '[INVALID]';
+  
+  const atIndex = email.indexOf('@');
+  if (atIndex < 1) return '[MALFORMED]';
+  
+  const localPart = email.substring(0, atIndex);
+  const domainPart = email.substring(atIndex + 1);
+  const dotIndex = domainPart.lastIndexOf('.');
+  
+  const visibleLocal = localPart.substring(0, Math.min(3, localPart.length));
+  const tld = dotIndex > 0 ? domainPart.substring(dotIndex) : '';
+  
+  return `${visibleLocal}***@***${tld}`;
+}
+
+/**
+ * Log Sanitization: Redact customer name for safe logging
+ * Transforms "John Smith" to "Joh*** S***"
+ */
+export function redactName(name: string): string {
+  if (!name || typeof name !== 'string') return '[INVALID]';
+  
+  const parts = name.trim().split(/\s+/);
+  return parts.map(part => {
+    if (part.length <= 1) return part[0] + '***';
+    return part.substring(0, Math.min(3, part.length)) + '***';
+  }).join(' ');
+}
+
+/**
  * VaultDiagnostic: Pre-flight integrity check for Ghost Hunter
  * Encrypts/decrypts a known test string and measures timing
  * @returns Object with success status and encryption timing in ms
