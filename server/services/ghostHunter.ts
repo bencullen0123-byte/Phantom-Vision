@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import Decimal from "decimal.js";
 import { storage } from "../storage";
 import { decrypt, vaultDiagnostic } from "../utils/crypto";
 import type { Merchant } from "@shared/schema";
@@ -459,6 +460,7 @@ async function scanForImpendingRisks(
         });
         
         telemetry.impendingCount++;
+        // Note: impendingRiskTally is used for logging only, accumulated as integer cents
         telemetry.impendingRiskTally += mrr;
         
         console.log(`[GHOST HUNTER] Impending risk detected: ${email}, MRR: ${(mrr / 100).toFixed(2)}, card expires ${exp_month}/${exp_year}`);
@@ -488,6 +490,11 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
   
   // Determine if this is a delta sync or full scan
   const isDeltaSync = !forceSync && lastAuditAt !== null && lastAuditAt !== undefined;
+  
+  // FINANCIAL MATH REMEDIATION: Use Decimal.js for all currency accumulations
+  // to prevent floating-point drift (0.1 + 0.2 !== 0.3 in standard JS)
+  let grossInvoicedDecimal = new Decimal(isDeltaSync ? existingGrossInvoicedCents : 0);
+  let totalRevenueAtRiskDecimal = new Decimal(0);
   
   const result: ScanResult & { telemetry?: TelemetryState } = {
     merchantId,
@@ -629,7 +636,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
         }
 
         // GROSS INVOICED: Accumulate total invoiced (paid + unpaid) for leakage rate calculation
-        result.grossInvoicedCents += invoice.amount_due || 0;
+        // FINANCIAL MATH REMEDIATION: Use Decimal.js accumulator
+        grossInvoicedDecimal = grossInvoicedDecimal.plus(invoice.amount_due || 0);
 
         // HAMMER DIRECTIVE: Relaxed Status Firewall
         // Include incomplete and draft statuses to capture test scenarios and real-world failed initial payments
@@ -732,7 +740,8 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 failureMessage,
               });
 
-              result.totalRevenueAtRisk += amount;
+              // FINANCIAL MATH REMEDIATION: Use Decimal.js accumulator
+              totalRevenueAtRiskDecimal = totalRevenueAtRiskDecimal.plus(amount);
               
               // Decrement remaining capacity only for newly ingested ghosts
               if (isNewGhost) {
@@ -842,6 +851,10 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     }
   }
 
+  // FINANCIAL MATH REMEDIATION: Convert Decimal accumulators to integers at DB write boundary
+  result.grossInvoicedCents = grossInvoicedDecimal.round().toNumber();
+  result.totalRevenueAtRisk = totalRevenueAtRiskDecimal.round().toNumber();
+  
   // Update lastAuditAt, defaultCurrency, and grossInvoicedCents (leakage calculated from ghost_targets)
   if (scanCompletedSuccessfully) {
     try {

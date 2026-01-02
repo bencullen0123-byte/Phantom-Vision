@@ -2,6 +2,7 @@ import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type M
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
+import Decimal from "decimal.js";
 
 // Rate limiting for Sentinel Auto-Pilot (Safety Valve: 50 emails/hour/merchant)
 const RATE_LIMIT_PER_HOUR = 50;
@@ -389,7 +390,10 @@ export class DatabaseStorage implements IStorage {
     `);
     const totalRecoveredCents = Number((recoveredResult.rows[0] as any)?.total || 0);
     
-    const recoveryRate = totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0;
+    // FINANCIAL MATH REMEDIATION: Use Decimal.js for precise rate calculation
+    const recoveryRate = totalGhosts > 0 
+      ? new Decimal(recoveredCount).dividedBy(totalGhosts).times(100).toNumber()
+      : 0;
     
     return {
       totalGhostsFound: totalGhosts,
@@ -533,7 +537,10 @@ export class DatabaseStorage implements IStorage {
     const row = aggregateResult.rows[0] as any;
     const totalGhosts = Number(row?.total_count || 0);
     const recoveredCount = Number(row?.recovered_count || 0);
-    const recoveryRate = totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0;
+    // FINANCIAL MATH REMEDIATION: Use Decimal.js for precise rate calculation
+    const recoveryRate = totalGhosts > 0 
+      ? new Decimal(recoveredCount).dividedBy(totalGhosts).times(100).toNumber()
+      : 0;
     
     // AUDIT PROOF: totalVetted with fallback logic
     // Priority: merchant.totalVettedCount > estimated from grossInvoiced > minimum baseline of 271
