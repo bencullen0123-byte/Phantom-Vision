@@ -144,10 +144,15 @@ function ConversionFunnel({ funnel, recoveryRate, auditedCount }: {
   recoveryRate?: number;
   auditedCount?: number;
 }) {
+  // If auditedCount is 0 or undefined but we have ghosts, show ghosts as the base (minimum audited)
+  const effectiveAuditedCount = auditedCount && auditedCount > 0 
+    ? auditedCount 
+    : Math.max(funnel?.totalGhosts || 0, 1);
+  
   const steps = [
     { 
       label: "Audited", 
-      value: auditedCount || 0, 
+      value: effectiveAuditedCount, 
       icon: FileText, 
       color: "text-indigo-400",
       bg: "bg-indigo-500/20"
@@ -191,7 +196,7 @@ function ConversionFunnel({ funnel, recoveryRate, auditedCount }: {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-slate-500">
-            {auditedCount?.toLocaleString() || 0} Invoices Audited
+            {effectiveAuditedCount.toLocaleString()} Invoices Audited
           </span>
           <div className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-emerald-400" />
