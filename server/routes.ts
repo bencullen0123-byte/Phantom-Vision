@@ -482,6 +482,13 @@ export async function registerRoutes(
         insight = `${dominant.percentage}% of your leakage is '${dominant.category}'. These are ${recoverability}% recoverable with Pulse Retries.`;
       }
 
+      // Build conversion funnel metrics
+      const totalGhosts = ghosts.length;
+      const nudgedCount = ghosts.filter(g => (g.emailCount || 0) > 0).length;
+      const clickedCount = ghosts.filter(g => (g.clickCount || 0) > 0).length;
+      const recoveredCount = ghosts.filter(g => g.status === "recovered").length;
+      const recoveryRate = totalGhosts > 0 ? Math.round((recoveredCount / totalGhosts) * 100) : 0;
+
       return res.json({
         id: merchant.id,
         lastAuditAt: merchant.lastAuditAt,
@@ -504,6 +511,13 @@ export async function registerRoutes(
           activeGhostCount: activeGhosts.length,
           insight,
         },
+        funnel: {
+          totalGhosts,
+          nudgedCount,
+          clickedCount,
+          recoveredCount,
+        },
+        recoveryRate,
       });
     } catch (error: any) {
       console.error("[STATS] Failed to get merchant stats:", error);
