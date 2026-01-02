@@ -10,6 +10,9 @@ import { runSeeder } from "./services/seeder";
 import { requireMerchant } from "./middleware/auth";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
+import { z } from "zod";
+import { scanRequestSchema, merchantBrandingUpdateSchema, emailTemplateUpdateSchema } from "@shared/schema";
+import { fromZodError } from "zod-validation-error";
 
 // Cookie name for OAuth state
 const OAUTH_STATE_COOKIE = "phantom_oauth_state";
@@ -284,7 +287,18 @@ export async function registerRoutes(
   // Returns 202 Accepted immediately with job ID for status polling
   app.post("/api/scan", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
-    const forceSync = req.body?.forceSync === true;
+    
+    // Validate request body with Zod
+    const parseResult = scanRequestSchema.safeParse(req.body || {});
+    if (!parseResult.success) {
+      const validationError = fromZodError(parseResult.error);
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid request body",
+        details: validationError.message,
+      });
+    }
+    const { forceSync } = parseResult.data;
     
     const merchant = await storage.getMerchant(merchantId);
     if (!merchant) {
@@ -432,8 +446,19 @@ export async function registerRoutes(
   app.patch("/api/merchant/branding", requireMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
+    // Validate request body with Zod
+    const parseResult = merchantBrandingUpdateSchema.safeParse(req.body || {});
+    if (!parseResult.success) {
+      const validationError = fromZodError(parseResult.error);
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid request body",
+        details: validationError.message,
+      });
+    }
+
     try {
-      const { businessName, supportEmail, brandColor, autoPilotEnabled } = req.body;
+      const { businessName, supportEmail, brandColor, autoPilotEnabled } = parseResult.data;
       
       const updateData: Record<string, any> = {};
       if (businessName !== undefined) updateData.businessName = businessName;

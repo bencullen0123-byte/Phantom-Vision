@@ -3,6 +3,34 @@ import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial } f
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ============================================================================
+// API REQUEST VALIDATION SCHEMAS
+// ============================================================================
+
+// POST /api/scan request body validation
+export const scanRequestSchema = z.object({
+  forceSync: z.boolean().optional().default(false),
+});
+
+export type ScanRequest = z.infer<typeof scanRequestSchema>;
+
+// PATCH /api/merchant/branding request body validation
+export const merchantBrandingUpdateSchema = z.object({
+  businessName: z.string().min(1).max(200).optional(),
+  supportEmail: z.string().email().optional(),
+  brandColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color").optional(),
+  autoPilotEnabled: z.boolean().optional(),
+});
+
+export type MerchantBrandingUpdate = z.infer<typeof merchantBrandingUpdateSchema>;
+
+// POST /api/merchant/email-template request body validation
+export const emailTemplateUpdateSchema = z.object({
+  customEmailTemplate: z.string().max(10000).optional().nullable(),
+});
+
+export type EmailTemplateUpdate = z.infer<typeof emailTemplateUpdateSchema>;
+
 // Merchants table - stores encrypted Stripe access tokens
 export const merchants = pgTable("merchants", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
