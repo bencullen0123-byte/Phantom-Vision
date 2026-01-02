@@ -298,6 +298,25 @@ export const insertScanJobSchema = createInsertSchema(scanJobs).omit({
 export type InsertScanJob = z.infer<typeof insertScanJobSchema>;
 export type ScanJob = typeof scanJobs.$inferSelect;
 
+// Audit Logs table - comprehensive audit trail for compliance and debugging
+export const auditLogs = pgTable("audit_logs", {
+  id: serial("id").primaryKey(),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
+  actorId: varchar("actor_id").notNull(),
+  action: text("action").notNull(),
+  entityId: varchar("entity_id"),
+  details: text("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
 // ============================================================================
 // DRIZZLE RELATIONS - Define table relationships for type-safe joins
 // ============================================================================
@@ -307,6 +326,15 @@ export const merchantsRelations = relations(merchants, ({ many }) => ({
   ghostTargets: many(ghostTargets),
   piiVaultEntries: many(piiVault),
   liquidityOracle: many(liquidityOracle),
+  auditLogs: many(auditLogs),
+}));
+
+// Audit logs relations
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [auditLogs.merchantId],
+    references: [merchants.id],
+  }),
 }));
 
 // PII Vault relations (One-to-One with ghost_targets, Many-to-One with merchants)

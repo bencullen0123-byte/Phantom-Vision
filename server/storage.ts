@@ -1,4 +1,4 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
@@ -350,6 +350,9 @@ export interface IStorage {
   updateScanJob(id: number, updates: { status?: string; progress?: number; error?: string | null; completedAt?: Date | null }): Promise<ScanJob | undefined>;
   pickNextJob(): Promise<ScanJob | undefined>;
   getMerchantPendingJob(merchantId: string): Promise<ScanJob | undefined>;
+  
+  // Audit Logs (Compliance & Debugging Trail)
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -514,11 +517,46 @@ export class DatabaseStorage implements IStorage {
       return this.getMerchant(id);
     }
 
+    // Get previous values for audit trail
+    const previousMerchant = await this.getMerchant(id);
+
     const [updated] = await db
       .update(merchants)
       .set(updatePayload)
       .where(eq(merchants.id, id))
       .returning();
+    
+    // Create audit log for branding update
+    if (updated) {
+      const previousValues: Record<string, any> = {};
+      const newValues: Record<string, any> = {};
+      
+      if (data.businessName !== undefined) {
+        previousValues.businessName = previousMerchant?.businessName;
+        newValues.businessName = data.businessName;
+      }
+      if (data.supportEmail !== undefined) {
+        previousValues.supportEmail = previousMerchant?.supportEmail;
+        newValues.supportEmail = data.supportEmail;
+      }
+      if (data.brandColor !== undefined) {
+        previousValues.brandColor = previousMerchant?.brandColor;
+        newValues.brandColor = data.brandColor;
+      }
+      if (data.autoPilotEnabled !== undefined) {
+        previousValues.autoPilotEnabled = previousMerchant?.autoPilotEnabled;
+        newValues.autoPilotEnabled = data.autoPilotEnabled;
+      }
+      
+      await this.createAuditLog({
+        merchantId: id,
+        actorId: id,
+        action: "branding.updated",
+        entityId: id,
+        details: JSON.stringify({ previous_value: previousValues, new_value: newValues }),
+      });
+    }
+    
     return updated || undefined;
   }
 
@@ -1000,6 +1038,20 @@ export class DatabaseStorage implements IStorage {
       ))
       .returning();
     if (!dbRecord) return undefined;
+    
+    // Create audit log for ghost.recovered
+    await this.createAuditLog({
+      merchantId: dbRecord.merchantId,
+      actorId: recoveryType === 'direct' ? 'phantom_system' : 'stripe_webhook',
+      action: "ghost.recovered",
+      entityId: id,
+      details: JSON.stringify({ 
+        previous_value: { status: "pending" }, 
+        new_value: { status: "recovered", recoveryType },
+        amount: dbRecord.amount,
+        invoiceId: dbRecord.invoiceId,
+      }),
+    });
     
     // Fetch vault record for hybrid decryption
     const vaultRecord = dbRecord.piiVaultId 
@@ -1487,6 +1539,16 @@ export class DatabaseStorage implements IStorage {
       .insert(scanJobs)
       .values({ merchantId, status: "pending", progress: 0 })
       .returning();
+    
+    // Create audit log for scan.started
+    await this.createAuditLog({
+      merchantId,
+      actorId: merchantId,
+      action: "scan.started",
+      entityId: String(job.id),
+      details: JSON.stringify({ jobId: job.id, status: "pending" }),
+    });
+    
     return job;
   }
 
@@ -1550,6 +1612,18 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(scanJobs.createdAt))
       .limit(1);
     return job || undefined;
+  }
+
+  // ============================================================================
+  // AUDIT LOGS
+  // ============================================================================
+  
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [auditLog] = await db
+      .insert(auditLogs)
+      .values(log)
+      .returning();
+    return auditLog;
   }
 }
 
