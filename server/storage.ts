@@ -102,25 +102,74 @@ export interface ShadowRevenueUpdate {
 
 // TITANIUM: Decryption error placeholder - prevents system-wide crash on key mismatch
 const ENCRYPTION_ERROR_PLACEHOLDER = "ENCRYPTION_ERROR";
+// PII Shredded placeholder - shown when GDPR deletion has occurred
+const PII_SHREDDED_PLACEHOLDER = "[PII_DELETED]";
 
 /**
- * Decrypt a GhostTargetDb record to application-level GhostTarget with plaintext PII.
- * Titanium Requirement: If decryption fails, returns placeholder values instead of crashing.
+ * Decrypt PII from a Privacy Vault record.
+ * Returns plaintext email and customerName.
  */
-function decryptGhostTarget(dbRecord: GhostTargetDb): GhostTarget {
+function decryptPiiFromVault(vaultRecord: PiiVault): { email: string; customerName: string } {
   let email = ENCRYPTION_ERROR_PLACEHOLDER;
   let customerName = ENCRYPTION_ERROR_PLACEHOLDER;
   
   try {
-    email = decrypt(dbRecord.emailCiphertext, dbRecord.emailIv, dbRecord.emailTag);
+    email = decrypt(vaultRecord.emailCiphertext, vaultRecord.emailIv, vaultRecord.emailTag);
   } catch (error: any) {
-    console.error(`[SECURITY] Email decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+    console.error(`[SECURITY] Vault email decryption failed for vault ${vaultRecord.id}: ${error.message}`);
   }
   
   try {
-    customerName = decrypt(dbRecord.customerNameCiphertext, dbRecord.customerNameIv, dbRecord.customerNameTag);
+    if (vaultRecord.nameCiphertext && vaultRecord.nameIv && vaultRecord.nameTag) {
+      customerName = decrypt(vaultRecord.nameCiphertext, vaultRecord.nameIv, vaultRecord.nameTag);
+    }
   } catch (error: any) {
-    console.error(`[SECURITY] CustomerName decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+    console.error(`[SECURITY] Vault name decryption failed for vault ${vaultRecord.id}: ${error.message}`);
+  }
+  
+  return { email, customerName };
+}
+
+/**
+ * Decrypt a GhostTargetDb record to application-level GhostTarget with plaintext PII.
+ * HYBRID DECRYPTION: Prioritizes piiVaultId when present, falls back to deprecated columns.
+ * Titanium Requirement: If decryption fails, returns placeholder values instead of crashing.
+ */
+function decryptGhostTarget(dbRecord: GhostTargetDb, vaultRecord?: PiiVault | null): GhostTarget {
+  let email = ENCRYPTION_ERROR_PLACEHOLDER;
+  let customerName = ENCRYPTION_ERROR_PLACEHOLDER;
+  
+  // HYBRID READ: Check if vault record exists (new architecture)
+  if (vaultRecord) {
+    const decryptedPii = decryptPiiFromVault(vaultRecord);
+    email = decryptedPii.email;
+    customerName = decryptedPii.customerName;
+  } else if (dbRecord.piiVaultId) {
+    // Vault ID exists but no vault record provided - PII was shredded (GDPR deletion)
+    email = PII_SHREDDED_PLACEHOLDER;
+    customerName = PII_SHREDDED_PLACEHOLDER;
+  } else {
+    // LEGACY PATH: Use deprecated columns (backward compatibility during migration)
+    // Skip if columns contain VAULT_MIGRATED placeholder
+    if (dbRecord.emailCiphertext && 
+        dbRecord.emailCiphertext !== VAULT_MIGRATED_PLACEHOLDER &&
+        dbRecord.emailIv && dbRecord.emailTag) {
+      try {
+        email = decrypt(dbRecord.emailCiphertext, dbRecord.emailIv, dbRecord.emailTag);
+      } catch (error: any) {
+        console.error(`[SECURITY] Email decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+      }
+    }
+    
+    if (dbRecord.customerNameCiphertext && 
+        dbRecord.customerNameCiphertext !== VAULT_MIGRATED_PLACEHOLDER &&
+        dbRecord.customerNameIv && dbRecord.customerNameTag) {
+      try {
+        customerName = decrypt(dbRecord.customerNameCiphertext, dbRecord.customerNameIv, dbRecord.customerNameTag);
+      } catch (error: any) {
+        console.error(`[SECURITY] CustomerName decryption failed for ghost ${dbRecord.id}: ${error.message}`);
+      }
+    }
   }
   
   return {
