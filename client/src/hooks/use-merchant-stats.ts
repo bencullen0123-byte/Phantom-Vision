@@ -38,6 +38,7 @@ export interface MerchantStats {
     nudgedCount: number;
     clickedCount: number;
     recoveredCount: number;
+    totalVetted: number; // Cumulative invoices ever vetted by Ghost Hunter
   };
   recoveryRate?: number;
 }

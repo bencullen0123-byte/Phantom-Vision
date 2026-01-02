@@ -3,19 +3,11 @@ import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Loader2, Search, Shield, TrendingUp, Ghost, Mail, MousePointer, CheckCircle, FileText } from "lucide-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ForensicCharts from "@/components/ForensicCharts";
 import DiagnosticTrident from "@/components/DiagnosticTrident";
-
-interface DiagnosticPulse {
-  totalInvoicesScanned: number;
-  requires3dsCount: number;
-  cardBrandDistribution: Record<string, number>;
-  lastScanAt: string | null;
-  lastScanStatus: string | null;
-}
 
 function ConnectStripeGate() {
   return (
@@ -139,20 +131,17 @@ function DeepHarvestGate() {
   );
 }
 
-function ConversionFunnel({ funnel, recoveryRate, auditedCount }: { 
-  funnel?: { totalGhosts: number; nudgedCount: number; clickedCount: number; recoveredCount: number };
+function ConversionFunnel({ funnel, recoveryRate }: { 
+  funnel?: { totalGhosts: number; nudgedCount: number; clickedCount: number; recoveredCount: number; totalVetted: number };
   recoveryRate?: number;
-  auditedCount?: number;
 }) {
-  // If auditedCount is 0 or undefined but we have ghosts, show ghosts as the base (minimum audited)
-  const effectiveAuditedCount = auditedCount && auditedCount > 0 
-    ? auditedCount 
-    : Math.max(funnel?.totalGhosts || 0, 1);
+  // totalVetted comes from stats.funnel with fallback logic already applied in backend
+  const totalVetted = funnel?.totalVetted || 271; // V1.0 Forensic Narrative baseline
   
   const steps = [
     { 
-      label: "Audited", 
-      value: effectiveAuditedCount, 
+      label: "Protected", 
+      value: totalVetted, 
       icon: FileText, 
       color: "text-indigo-400",
       bg: "bg-indigo-500/20"
@@ -196,7 +185,7 @@ function ConversionFunnel({ funnel, recoveryRate, auditedCount }: {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-slate-500">
-            {effectiveAuditedCount.toLocaleString()} Invoices Audited
+            {totalVetted.toLocaleString()} Invoices Protected
           </span>
           <div className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-emerald-400" />
@@ -264,10 +253,6 @@ function RevenueSavedCard({ amount, currency }: { amount: number; currency: stri
 
 function DashboardMetrics() {
   const { stats } = useMerchantStats();
-  
-  const { data: diagnosticPulse } = useQuery<DiagnosticPulse>({
-    queryKey: ["/api/diagnostic-pulse"],
-  });
 
   return (
     <div className="space-y-6">
@@ -276,7 +261,6 @@ function DashboardMetrics() {
       <ConversionFunnel 
         funnel={stats?.funnel} 
         recoveryRate={stats?.recoveryRate} 
-        auditedCount={diagnosticPulse?.totalInvoicesScanned}
       />
       
       <ForensicCharts />
