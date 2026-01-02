@@ -1,6 +1,6 @@
 import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault } from "@shared/schema";
 import { db } from "./db";
-import { eq, count, isNull, and, or, sql, desc, lt, ne } from "drizzle-orm";
+import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
 import Decimal from "decimal.js";
 
@@ -322,6 +322,7 @@ export interface IStorage {
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
   setGhostAttributionFlag(id: string, expiresAt: Date): Promise<GhostTarget | undefined>;
   recordGhostClick(id: string): Promise<GhostTarget | undefined>;
+  shredGhostPii(ghostId: string): Promise<boolean>;
   
   // Liquidity Oracle
   getLiquidityOracleEntry(id: string): Promise<LiquidityOracle | undefined>;
@@ -628,60 +629,235 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Ghost Targets (with AES-256-GCM encryption for PII)
+  // PRIVACY VAULT: Read methods now LEFT JOIN pii_vault for hybrid decryption
+  
   async getGhostTarget(id: string): Promise<GhostTarget | undefined> {
-    const [dbRecord] = await db.select().from(ghostTargets).where(eq(ghostTargets.id, id));
-    if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
+      .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
+      .where(eq(ghostTargets.id, id));
+    
+    if (!results.length) return undefined;
+    const { ghost, vault } = results[0];
+    return decryptGhostTarget(ghost, vault);
   }
 
   async getGhostTargetsByMerchant(merchantId: string): Promise<GhostTarget[]> {
-    const dbRecords = await db.select().from(ghostTargets).where(eq(ghostTargets.merchantId, merchantId));
-    return dbRecords.map(decryptGhostTarget);
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
+      .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
+      .where(eq(ghostTargets.merchantId, merchantId));
+    
+    return results.map(({ ghost, vault }) => decryptGhostTarget(ghost, vault));
   }
 
   async createGhostTarget(insertTarget: InsertGhostTarget): Promise<GhostTarget> {
-    const encryptedPayload = encryptGhostTargetForInsert(insertTarget);
-    const [dbRecord] = await db
-      .insert(ghostTargets)
-      .values(encryptedPayload)
-      .returning();
-    return decryptGhostTarget(dbRecord);
+    // PRIVACY VAULT: Transaction-based insert - PII goes to vault, financial data to ghost_targets
+    const encryptedEmail = encrypt(insertTarget.email);
+    const encryptedName = encrypt(insertTarget.customerName);
+    
+    return await db.transaction(async (tx) => {
+      // Step 1: Insert encrypted PII into pii_vault
+      const [vaultRecord] = await tx
+        .insert(piiVault)
+        .values({
+          merchantId: insertTarget.merchantId,
+          emailCiphertext: encryptedEmail.encryptedData,
+          emailIv: encryptedEmail.iv,
+          emailTag: encryptedEmail.tag,
+          nameCiphertext: encryptedName.encryptedData,
+          nameIv: encryptedName.iv,
+          nameTag: encryptedName.tag,
+        })
+        .returning();
+      
+      // Step 2: Insert financial data into ghost_targets with piiVaultId reference
+      // Use VAULT_MIGRATED placeholder for deprecated columns (satisfies NOT NULL if constraints exist)
+      const [dbRecord] = await tx
+        .insert(ghostTargets)
+        .values({
+          merchantId: insertTarget.merchantId,
+          piiVaultId: vaultRecord.id,
+          emailCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+          emailIv: VAULT_MIGRATED_PLACEHOLDER,
+          emailTag: VAULT_MIGRATED_PLACEHOLDER,
+          customerNameCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+          customerNameIv: VAULT_MIGRATED_PLACEHOLDER,
+          customerNameTag: VAULT_MIGRATED_PLACEHOLDER,
+          amount: insertTarget.amount,
+          invoiceId: insertTarget.invoiceId,
+          purgeAt: insertTarget.purgeAt,
+          discoveredAt: insertTarget.discoveredAt,
+          lastEmailedAt: insertTarget.lastEmailedAt,
+          emailCount: insertTarget.emailCount,
+          status: insertTarget.status,
+          recoveredAt: insertTarget.recoveredAt,
+          attributionExpiresAt: insertTarget.attributionExpiresAt,
+          recoveryType: insertTarget.recoveryType,
+          failureReason: insertTarget.failureReason,
+          declineType: insertTarget.declineType,
+          stripeCustomerId: insertTarget.stripeCustomerId,
+          failureCode: insertTarget.failureCode,
+          failureMessage: insertTarget.failureMessage,
+          cardBrand: insertTarget.cardBrand,
+          cardFunding: insertTarget.cardFunding,
+          countryCode: insertTarget.countryCode,
+          requires3ds: insertTarget.requires3ds,
+          stripeErrorCode: insertTarget.stripeErrorCode,
+          originalInvoiceDate: insertTarget.originalInvoiceDate,
+          recoveryStrategy: insertTarget.recoveryStrategy,
+          clickCount: insertTarget.clickCount,
+          lastClickedAt: insertTarget.lastClickedAt,
+        })
+        .returning();
+      
+      return decryptGhostTarget(dbRecord, vaultRecord);
+    });
   }
 
   async upsertGhostTarget(insertTarget: InsertGhostTarget): Promise<GhostTarget> {
-    const encryptedPayload = encryptGhostTargetForInsert(insertTarget);
-    const [dbRecord] = await db
-      .insert(ghostTargets)
-      .values(encryptedPayload)
-      .onConflictDoUpdate({
-        target: ghostTargets.invoiceId,
-        set: {
-          // Re-encrypt on update (new IV for forward secrecy)
-          emailCiphertext: encryptedPayload.emailCiphertext,
-          emailIv: encryptedPayload.emailIv,
-          emailTag: encryptedPayload.emailTag,
-          customerNameCiphertext: encryptedPayload.customerNameCiphertext,
-          customerNameIv: encryptedPayload.customerNameIv,
-          customerNameTag: encryptedPayload.customerNameTag,
-          amount: encryptedPayload.amount,
-          purgeAt: encryptedPayload.purgeAt,
-          failureReason: encryptedPayload.failureReason,
-          declineType: encryptedPayload.declineType,
-          failureCode: encryptedPayload.failureCode,
-          failureMessage: encryptedPayload.failureMessage,
-          // Universal Revenue Intelligence: ML metadata (enriched on re-scan)
-          cardBrand: encryptedPayload.cardBrand,
-          cardFunding: encryptedPayload.cardFunding,
-          countryCode: encryptedPayload.countryCode,
-          requires3ds: encryptedPayload.requires3ds,
-          stripeErrorCode: encryptedPayload.stripeErrorCode,
-          originalInvoiceDate: encryptedPayload.originalInvoiceDate,
-          // Recovery Strategy Selector (Sprint 2.3)
-          recoveryStrategy: encryptedPayload.recoveryStrategy,
-        },
-      })
-      .returning();
-    return decryptGhostTarget(dbRecord);
+    // PRIVACY VAULT: Transaction-based upsert with vault management
+    const encryptedEmail = encrypt(insertTarget.email);
+    const encryptedName = encrypt(insertTarget.customerName);
+    
+    return await db.transaction(async (tx) => {
+      // Check if ghost already exists
+      const [existingGhost] = await tx
+        .select()
+        .from(ghostTargets)
+        .where(eq(ghostTargets.invoiceId, insertTarget.invoiceId));
+      
+      if (existingGhost) {
+        // UPDATE PATH: Update existing vault entry if it exists, or create new one
+        let vaultId = existingGhost.piiVaultId;
+        let vaultRecord: PiiVault | null = null;
+        
+        if (vaultId) {
+          // Update existing vault entry (re-encrypt for forward secrecy)
+          const [updated] = await tx
+            .update(piiVault)
+            .set({
+              emailCiphertext: encryptedEmail.encryptedData,
+              emailIv: encryptedEmail.iv,
+              emailTag: encryptedEmail.tag,
+              nameCiphertext: encryptedName.encryptedData,
+              nameIv: encryptedName.iv,
+              nameTag: encryptedName.tag,
+            })
+            .where(eq(piiVault.id, vaultId))
+            .returning();
+          vaultRecord = updated;
+        } else {
+          // Create new vault entry (migrating from legacy)
+          const [created] = await tx
+            .insert(piiVault)
+            .values({
+              merchantId: insertTarget.merchantId,
+              emailCiphertext: encryptedEmail.encryptedData,
+              emailIv: encryptedEmail.iv,
+              emailTag: encryptedEmail.tag,
+              nameCiphertext: encryptedName.encryptedData,
+              nameIv: encryptedName.iv,
+              nameTag: encryptedName.tag,
+            })
+            .returning();
+          vaultRecord = created;
+          vaultId = created.id;
+        }
+        
+        // Update ghost_targets with financial data and vault reference
+        const [dbRecord] = await tx
+          .update(ghostTargets)
+          .set({
+            piiVaultId: vaultId,
+            emailCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+            emailIv: VAULT_MIGRATED_PLACEHOLDER,
+            emailTag: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameIv: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameTag: VAULT_MIGRATED_PLACEHOLDER,
+            amount: insertTarget.amount,
+            purgeAt: insertTarget.purgeAt,
+            failureReason: insertTarget.failureReason,
+            declineType: insertTarget.declineType,
+            failureCode: insertTarget.failureCode,
+            failureMessage: insertTarget.failureMessage,
+            cardBrand: insertTarget.cardBrand,
+            cardFunding: insertTarget.cardFunding,
+            countryCode: insertTarget.countryCode,
+            requires3ds: insertTarget.requires3ds,
+            stripeErrorCode: insertTarget.stripeErrorCode,
+            originalInvoiceDate: insertTarget.originalInvoiceDate,
+            recoveryStrategy: insertTarget.recoveryStrategy,
+          })
+          .where(eq(ghostTargets.invoiceId, insertTarget.invoiceId))
+          .returning();
+        
+        return decryptGhostTarget(dbRecord, vaultRecord);
+      } else {
+        // INSERT PATH: Create new vault and ghost entries
+        const [vaultRecord] = await tx
+          .insert(piiVault)
+          .values({
+            merchantId: insertTarget.merchantId,
+            emailCiphertext: encryptedEmail.encryptedData,
+            emailIv: encryptedEmail.iv,
+            emailTag: encryptedEmail.tag,
+            nameCiphertext: encryptedName.encryptedData,
+            nameIv: encryptedName.iv,
+            nameTag: encryptedName.tag,
+          })
+          .returning();
+        
+        const [dbRecord] = await tx
+          .insert(ghostTargets)
+          .values({
+            merchantId: insertTarget.merchantId,
+            piiVaultId: vaultRecord.id,
+            emailCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+            emailIv: VAULT_MIGRATED_PLACEHOLDER,
+            emailTag: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameCiphertext: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameIv: VAULT_MIGRATED_PLACEHOLDER,
+            customerNameTag: VAULT_MIGRATED_PLACEHOLDER,
+            amount: insertTarget.amount,
+            invoiceId: insertTarget.invoiceId,
+            purgeAt: insertTarget.purgeAt,
+            discoveredAt: insertTarget.discoveredAt,
+            lastEmailedAt: insertTarget.lastEmailedAt,
+            emailCount: insertTarget.emailCount,
+            status: insertTarget.status,
+            recoveredAt: insertTarget.recoveredAt,
+            attributionExpiresAt: insertTarget.attributionExpiresAt,
+            recoveryType: insertTarget.recoveryType,
+            failureReason: insertTarget.failureReason,
+            declineType: insertTarget.declineType,
+            stripeCustomerId: insertTarget.stripeCustomerId,
+            failureCode: insertTarget.failureCode,
+            failureMessage: insertTarget.failureMessage,
+            cardBrand: insertTarget.cardBrand,
+            cardFunding: insertTarget.cardFunding,
+            countryCode: insertTarget.countryCode,
+            requires3ds: insertTarget.requires3ds,
+            stripeErrorCode: insertTarget.stripeErrorCode,
+            originalInvoiceDate: insertTarget.originalInvoiceDate,
+            recoveryStrategy: insertTarget.recoveryStrategy,
+            clickCount: insertTarget.clickCount,
+            lastClickedAt: insertTarget.lastClickedAt,
+          })
+          .returning();
+        
+        return decryptGhostTarget(dbRecord, vaultRecord);
+      }
+    });
   }
 
   async countGhostsByMerchant(merchantId: string): Promise<number> {
@@ -693,21 +869,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getGhostByInvoiceId(invoiceId: string): Promise<GhostTarget | undefined> {
-    const [dbRecord] = await db.select().from(ghostTargets).where(eq(ghostTargets.invoiceId, invoiceId));
-    if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
+      .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
+      .where(eq(ghostTargets.invoiceId, invoiceId));
+    
+    if (!results.length) return undefined;
+    const { ghost, vault } = results[0];
+    return decryptGhostTarget(ghost, vault);
   }
 
   async getUnprocessedGhosts(): Promise<GhostTarget[]> {
     const now = new Date();
-    const dbRecords = await db
-      .select()
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
       .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
       .where(and(
         isNull(ghostTargets.lastEmailedAt),
         sql`${ghostTargets.purgeAt} > ${now}`
       ));
-    return dbRecords.map(decryptGhostTarget);
+    return results.map(({ ghost, vault }) => decryptGhostTarget(ghost, vault));
   }
 
   async getEligibleGhostsForEmail(): Promise<GhostTarget[]> {
@@ -722,9 +911,13 @@ export class DatabaseStorage implements IStorage {
     // - Not purged yet
     // - Grace period: discovered more than 4 hours ago
     // - Not emailed in the last 7 days (or never emailed)
-    const dbRecords = await db
-      .select()
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
       .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
       .where(and(
         or(
           eq(ghostTargets.status, "pending"),
@@ -738,7 +931,7 @@ export class DatabaseStorage implements IStorage {
           sql`${ghostTargets.lastEmailedAt} < ${sevenDaysAgo}`
         )
       ));
-    return dbRecords.map(decryptGhostTarget);
+    return results.map(({ ghost, vault }) => decryptGhostTarget(ghost, vault));
   }
 
   async updateGhostEmailStatus(id: string): Promise<GhostTarget | undefined> {
@@ -751,7 +944,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
   }
 
   async markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined> {
@@ -769,7 +967,12 @@ export class DatabaseStorage implements IStorage {
       ))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
   }
 
   async markGhostExhausted(id: string): Promise<GhostTarget | undefined> {
@@ -781,7 +984,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
   }
 
   async markGhostProtected(id: string): Promise<GhostTarget | undefined> {
@@ -797,20 +1005,31 @@ export class DatabaseStorage implements IStorage {
       ))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
   }
 
   async getImpendingGhostByStripeCustomerId(stripeCustomerId: string): Promise<GhostTarget | undefined> {
-    const [dbRecord] = await db
-      .select()
+    const results = await db
+      .select({
+        ghost: ghostTargets,
+        vault: piiVault,
+      })
       .from(ghostTargets)
+      .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
       .where(and(
         eq(ghostTargets.stripeCustomerId, stripeCustomerId),
         eq(ghostTargets.status, "impending")
       ))
       .limit(1);
-    if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    if (!results.length) return undefined;
+    const { ghost, vault } = results[0];
+    return decryptGhostTarget(ghost, vault);
   }
 
   async countRecoveredGhostsByMerchant(merchantId: string): Promise<number> {
@@ -844,7 +1063,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
   }
 
   async recordGhostClick(id: string): Promise<GhostTarget | undefined> {
@@ -857,7 +1081,39 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     if (!dbRecord) return undefined;
-    return decryptGhostTarget(dbRecord);
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
+  }
+
+  // GDPR Right to be Forgotten: Permanently shred PII while preserving financial record
+  async shredGhostPii(ghostId: string): Promise<boolean> {
+    // Find the ghost and its vault reference
+    const [ghost] = await db
+      .select({ piiVaultId: ghostTargets.piiVaultId })
+      .from(ghostTargets)
+      .where(eq(ghostTargets.id, ghostId));
+    
+    if (!ghost || !ghost.piiVaultId) {
+      console.warn(`[GDPR] Cannot shred PII for ghost ${ghostId}: no vault reference found`);
+      return false;
+    }
+    
+    // Delete the PII vault entry - financial record in ghost_targets remains intact
+    const result = await db
+      .delete(piiVault)
+      .where(eq(piiVault.id, ghost.piiVaultId))
+      .returning();
+    
+    if (result.length > 0) {
+      console.log(`[GDPR] PII shredded for ghost ${ghostId}, vault ${ghost.piiVaultId}`);
+      return true;
+    }
+    
+    return false;
   }
 
   // Liquidity Oracle
