@@ -12,7 +12,8 @@ import {
   RefreshCw,
   CreditCard,
   Zap,
-  RotateCcw
+  RotateCcw,
+  Scan
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,9 +22,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useScanJob } from "@/hooks/use-scan-job";
 import { useState, useEffect } from "react";
 
 interface BrandingFormData {
@@ -596,6 +599,81 @@ function MerchantProfileForm() {
   );
 }
 
+function DiagnosticOperations() {
+  const { toast } = useToast();
+  const { startScan, status, progress, isScanning, error } = useScanJob();
+
+  useEffect(() => {
+    if (status === "completed") {
+      toast({
+        title: "Scan Complete",
+        description: "Your financial data has been refreshed.",
+      });
+    } else if (status === "failed" && error) {
+      toast({
+        title: "Scan Failed",
+        description: error,
+        variant: "destructive",
+      });
+    }
+  }, [status, error, toast]);
+
+  return (
+    <Card className="bg-slate-900 border-white/10">
+      <CardContent className="pt-6">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+            <Scan className="w-5 h-5 text-purple-400" />
+          </div>
+          <div className="flex-1 space-y-3">
+            <div>
+              <h3 className="text-lg font-medium text-white mb-1">Diagnostic Scan</h3>
+              <p className="text-slate-400 text-sm">
+                Rescan your Stripe account to detect new ghost users and refresh metrics.
+              </p>
+            </div>
+            
+            {isScanning && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Scanning...</span>
+                  <span 
+                    className="text-purple-400 font-mono"
+                    data-testid="text-scan-progress"
+                  >
+                    {progress}%
+                  </span>
+                </div>
+                <Progress value={progress} className="h-1.5" />
+              </div>
+            )}
+            
+            <Button 
+              variant="outline" 
+              className="border-white/10 text-slate-200"
+              onClick={() => startScan()}
+              disabled={isScanning}
+              data-testid="button-rescan"
+            >
+              {isScanning ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Scanning... {progress}%
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Rescan Now
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { merchant, isLoading, isAuthenticated, authLoading } = useMerchant();
 
@@ -623,6 +701,10 @@ export default function SettingsPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {isAuthenticated && merchant && (
+          <DiagnosticOperations />
+        )}
+
         {isAuthenticated && merchant && (
           <Card className="bg-slate-900 border-white/10">
             <CardContent className="pt-6">

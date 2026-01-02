@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { LayoutDashboard, Settings, DollarSign, LogOut, Clock, Shield, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,8 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
-import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useScanJob } from "@/hooks/use-scan-job";
 
 interface NavItem {
   label: string;
@@ -205,37 +205,24 @@ function formatEuro(cents: number): string {
 
 function GlobalHeader() {
   const { merchant } = useMerchant();
-  const { stats, refetch: refetchStats } = useMerchantStats();
+  const { stats } = useMerchantStats();
   const { toast } = useToast();
+  const { startScan, status: scanStatus, progress, isScanning, error: scanError } = useScanJob();
 
-  const auditMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/audit/run", { forceSync: true });
-      return { data: await res.json(), status: res.status };
-    },
-    onSuccess: ({ data, status }) => {
-      if (status === 202) {
-        toast({
-          title: "Audit Initiated",
-          description: "Scanning in background...",
-        });
-      } else {
-        toast({
-          title: "Audit Complete",
-          description: `Found ${data.total_ghosts_found} ghosts.`,
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
-      refetchStats();
-    },
-    onError: (error: Error) => {
+  useEffect(() => {
+    if (scanStatus === "completed") {
       toast({
-        title: "Audit Failed",
-        description: error.message,
+        title: "Scan Complete",
+        description: "Your financial data has been refreshed.",
+      });
+    } else if (scanStatus === "failed" && scanError) {
+      toast({
+        title: "Scan Failed",
+        description: scanError,
         variant: "destructive",
       });
-    },
-  });
+    }
+  }, [scanStatus, scanError, toast]);
 
   const isArmed = merchant?.autoPilotEnabled || false;
   const volumeGuarded = stats?.grossInvoicedCents || 0;
@@ -283,13 +270,18 @@ function GlobalHeader() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-slate-400 hover:text-white"
-          onClick={() => auditMutation.mutate()}
-          disabled={auditMutation.isPending}
+          className="h-7 px-2 text-slate-400 hover:text-white min-w-[4rem]"
+          onClick={() => startScan()}
+          disabled={isScanning}
           data-testid="button-refresh-audit"
         >
-          {auditMutation.isPending ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          {isScanning ? (
+            <span className="flex items-center gap-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span className="text-xs tabular-nums" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                {progress}%
+              </span>
+            </span>
           ) : (
             <RefreshCw className="w-3.5 h-3.5" />
           )}
