@@ -1,0 +1,76 @@
+Task 3.1 - Background Job Architecture
+Context: Currently, POST /api/scan executes the entire scanning logic synchronously. This causes timeouts on Vercel and Replit (60s limit) for large merchants. We must decouple the initiation of a scan from the execution of a scan.
+
+Role: Act as a Backend Architect.
+
+Objective: Implement a Database-Backed Job Queue to handle scanning asynchronously.
+
+Execution Steps:
+
+Schema Update (shared/schema.ts):
+
+Create table scan_jobs:
+
+id: serial primary key.
+
+merchant_id: varchar (Foreign Key to merchants).
+
+status: text (enum-like: 'pending', 'processing', 'completed', 'failed').
+
+progress: integer (0-100).
+
+created_at: timestamp (default now).
+
+completed_at: timestamp (nullable).
+
+error: text (nullable).
+
+Export insertScanJobSchema and related types.
+
+Storage Layer (server/storage.ts):
+
+Method: createScanJob(merchantId: string) -> Returns the Job object.
+
+Method: getScanJob(id: number) -> Returns Job status.
+
+Method: updateScanJob(id, updates) -> Updates status/progress/error.
+
+Method: pickNextJob() -> Finds one 'pending' job, atomically updates it to 'processing', and returns it. (Use db.transaction or specific SQL locking if possible, otherwise simple update is acceptable for this scale).
+
+Refactor Ghost Hunter (server/services/ghostHunter.ts):
+
+Refactor: Rename scanMerchant to processScanJob(jobId: number, merchantId: string).
+
+Logic:
+
+Update job status to 'processing'.
+
+During the loop, periodically update progress (e.g., every 50 items).
+
+On success: update status to 'completed'.
+
+On error: update status to 'failed' and save the error message.
+
+The Worker: Create and export a function startJobWorker().
+
+Use setInterval (e.g., every 5 seconds).
+
+Check storage.pickNextJob().
+
+If job found, await processScanJob(...).
+
+Route Layer (server/routes.ts):
+
+Update POST /api/scan:
+
+Do NOT await the scan.
+
+Create the job via storage.
+
+Return { jobId: number, status: 'pending' } immediately.
+
+Add GET /api/scan/:id:
+
+Return the current job status/progress.
+
+Output: Present the plan to implement the scan_jobs schema and the refactored ghostHunter.ts.
