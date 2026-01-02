@@ -181,16 +181,8 @@ function SentinelArmingStation() {
   const { merchant, refetch } = useMerchant();
   const { toast } = useToast();
   
-  const [isArmed, setIsArmed] = useState(false);
-  const [isToggling, setIsToggling] = useState(false);
-  
   const hasSupportEmail = Boolean(merchant?.supportEmail?.trim());
-
-  useEffect(() => {
-    if (merchant) {
-      setIsArmed(merchant.autoPilotEnabled || false);
-    }
-  }, [merchant]);
+  const isArmed = merchant?.autoPilotEnabled || false;
 
   const toggleMutation = useMutation({
     mutationFn: async (enabled: boolean) => {
@@ -206,11 +198,11 @@ function SentinelArmingStation() {
           ? "Auto-Pilot is now active. Recovery emails will be sent automatically."
           : "Auto-Pilot disabled. Manual approval required for recovery emails.",
       });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
       refetch();
     },
     onError: (error: Error) => {
-      setIsArmed(!isArmed);
       toast({
         title: "Failed to update",
         description: error.message,
@@ -219,7 +211,7 @@ function SentinelArmingStation() {
     },
   });
 
-  const handleToggle = async (enabled: boolean) => {
+  const handleToggle = (enabled: boolean) => {
     if (!hasSupportEmail && enabled) {
       toast({
         title: "Security Lock Active",
@@ -229,11 +221,10 @@ function SentinelArmingStation() {
       return;
     }
     
-    setIsArmed(enabled);
-    setIsToggling(true);
     toggleMutation.mutate(enabled);
-    setIsToggling(false);
   };
+  
+  const isToggling = toggleMutation.isPending;
 
   return (
     <Card className={`bg-slate-900 border-2 transition-all duration-500 ${
