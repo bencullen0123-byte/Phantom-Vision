@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { storage } from "../storage";
-import { decrypt } from "../utils/crypto";
+import { decrypt, redactEmail } from "../utils/crypto";
 
 const TEST_MERCHANT_ID = "395d4e40-7daf-4d55-9843-78403f2bc9fd";
 const PRODUCT_NAME = "PHANTOM Test Tier";
@@ -116,7 +116,7 @@ async function createGhostScenario(
   const currency = randomCurrency();
   const discoveredAt = randomBackdate();
   
-  console.log(`[SEEDER] Creating Ghost #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
+  console.log(`[SEEDER] Creating Ghost #${index}: ${redactEmail(email)} (${currency.toUpperCase()} ${amount/100}, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
   
   let customerId = `cus_mock_ghost_${index}`;
   let invoiceId = `inv_mock_ghost_${index}_${Date.now()}`;
@@ -182,7 +182,7 @@ async function createRiskScenario(
   const discoveredAt = randomBackdate();
   const expMonth = index % 2 === 0 ? 1 : 2;
   
-  console.log(`[SEEDER] Creating Risk #${index}: ${email} (${currency.toUpperCase()} ${amount/100}, expires ${expMonth}/2026, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
+  console.log(`[SEEDER] Creating Risk #${index}: ${redactEmail(email)} (${currency.toUpperCase()} ${amount/100}, expires ${expMonth}/2026, discovered: ${discoveredAt.toISOString().split('T')[0]})`);
   
   let customerId = `cus_mock_risk_${index}`;
   let subscriptionId = `sub_mock_risk_${index}_${Date.now()}`;
@@ -232,7 +232,7 @@ async function createSuccessScenario(
   const amount = randomPrice();
   const currency = randomCurrency();
   
-  console.log(`[SEEDER] Creating Success #${index}: ${email} (${currency.toUpperCase()} ${amount/100})`);
+  console.log(`[SEEDER] Creating Success #${index}: ${redactEmail(email)} (${currency.toUpperCase()} ${amount/100})`);
   
   const priceId = await getOrCreatePrice(stripe, productId, amount, currency);
   

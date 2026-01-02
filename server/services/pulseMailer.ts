@@ -3,6 +3,7 @@
 
 import { Resend } from 'resend';
 import type { Merchant, GhostTarget } from '@shared/schema';
+import { redactEmail } from '../utils/crypto';
 
 let connectionSettings: any;
 
@@ -425,7 +426,7 @@ export async function sendPulseEmail(
     console.log(`[PULSE MAILER] DRY RUN - Resend not connected`);
     console.log(`[PULSE MAILER] ═══════════════════════════════════════════════════`);
     console.log(`[PULSE MAILER] ${emailType} Email - DRY RUN`);
-    console.log(`[PULSE MAILER] To: ${target.email}`);
+    console.log(`[PULSE MAILER] To: ${redactEmail(target.email)}`);
     console.log(`[PULSE MAILER] From: ${businessName}`);
     console.log(`[PULSE MAILER] Reply-To: ${merchant.supportEmail || 'not set'}`);
     console.log(`[PULSE MAILER] Subject: ${subject}`);

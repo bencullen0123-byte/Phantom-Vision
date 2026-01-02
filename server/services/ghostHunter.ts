@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import Decimal from "decimal.js";
 import { storage } from "../storage";
-import { decrypt, vaultDiagnostic } from "../utils/crypto";
+import { decrypt, vaultDiagnostic, redactEmail } from "../utils/crypto";
 import type { Merchant } from "@shared/schema";
 
 // Diagnostic Shell Constants
@@ -463,7 +463,7 @@ async function scanForImpendingRisks(
         // Note: impendingRiskTally is used for logging only, accumulated as integer cents
         telemetry.impendingRiskTally += mrr;
         
-        console.log(`[GHOST HUNTER] Impending risk detected: ${email}, MRR: ${(mrr / 100).toFixed(2)}, card expires ${exp_month}/${exp_year}`);
+        console.log(`[GHOST HUNTER] Impending risk detected: ${redactEmail(email)}, MRR: ${(mrr / 100).toFixed(2)}, card expires ${exp_month}/${exp_year}`);
       }
       
       hasMore = subscriptions.has_more;
@@ -750,7 +750,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
 
               // Log ghost with failure reason
               const reasonLog = failureCode ? ` - Reason: ${failureCode}` : '';
-              console.log(`[GHOST HUNTER] Found Ghost: ${email}${reasonLog}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
+              console.log(`[GHOST HUNTER] Found Ghost: ${redactEmail(email)}${reasonLog}, amount: $${(amount / 100).toFixed(2)}${isNewGhost ? ` (${remainingCapacity} slots remaining)` : ' (update)'} [${upsertMs}ms]`);
             } else {
               telemetry.subscriptionFailed++;
               console.log('[FORENSIC] Invoice ' + invoice.id + ' failed subscription check for customer ' + customerId);

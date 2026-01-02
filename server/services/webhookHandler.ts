@@ -1,7 +1,7 @@
 // Webhook Handler - Processes Stripe webhook events
 import Stripe from "stripe";
 import { storage } from "../storage";
-import { decrypt } from "../utils/crypto";
+import { decrypt, redactEmail } from "../utils/crypto";
 import { determineRecoveryStrategy } from "./ghostHunter";
 import { sendGoldenHourEmail } from "./pulseMailer";
 
@@ -279,7 +279,7 @@ export async function handleInvoicePaymentFailed(
   });
 
   const formattedAmount = formatCentsToDisplay(amount, currency);
-  console.log(`[WEBHOOK] Real-time ghost discovery: ${email} - ${formattedAmount} at risk (${declineType || 'unknown'} decline)`);
+  console.log(`[WEBHOOK] Real-time ghost discovery: inv_${invoice.id.slice(-8)} - ${formattedAmount} at risk (${declineType || 'unknown'} decline)`);
 
   return {
     success: true,
