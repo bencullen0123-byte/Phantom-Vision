@@ -227,16 +227,17 @@ function BlueprintCanvas({ businessName, brandColor, supportEmail }: BlueprintCa
                 </div>
 
                 <div className="bg-gray-100 py-2 px-3 text-center border-t border-gray-200">
-                <p className="text-xs text-gray-500">
-                  Need help? Reply to this email.
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  {displayName}
-                </p>
+                  <p className="text-[10px] text-gray-500">
+                    Need help? Reply to this email.
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {displayName}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="bg-slate-700 rounded-full w-10 h-10 mx-auto mt-2 border-2 border-slate-600" />
+              <div className="bg-slate-700 rounded-full w-10 h-10 mx-auto mt-2 border-2 border-slate-600" />
+            </div>
           </div>
         </div>
 
