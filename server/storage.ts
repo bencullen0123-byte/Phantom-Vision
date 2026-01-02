@@ -4,6 +4,9 @@ import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzl
 import { encrypt, decrypt } from "./utils/crypto";
 import Decimal from "decimal.js";
 
+// Transaction type for atomic batch operations
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 // Privacy Vault: Placeholder value for deprecated PII columns (satisfies NOT NULL constraints)
 const VAULT_MIGRATED_PLACEHOLDER = "VAULT_MIGRATED";
 
@@ -308,7 +311,8 @@ export interface IStorage {
   getGhostTarget(id: string): Promise<GhostTarget | undefined>;
   getGhostTargetsByMerchant(merchantId: string): Promise<GhostTarget[]>;
   createGhostTarget(target: InsertGhostTarget): Promise<GhostTarget>;
-  upsertGhostTarget(target: InsertGhostTarget): Promise<GhostTarget>;
+  upsertGhostTarget(target: InsertGhostTarget, tx?: DbTransaction): Promise<GhostTarget>;
+  batchUpsertGhostTargets(targets: InsertGhostTarget[]): Promise<GhostTarget[]>;
   countGhostsByMerchant(merchantId: string): Promise<number>;
   getGhostByInvoiceId(invoiceId: string): Promise<GhostTarget | undefined>;
   getUnprocessedGhosts(): Promise<GhostTarget[]>;
@@ -730,12 +734,13 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async upsertGhostTarget(insertTarget: InsertGhostTarget): Promise<GhostTarget> {
+  async upsertGhostTarget(insertTarget: InsertGhostTarget, externalTx?: DbTransaction): Promise<GhostTarget> {
     // PRIVACY VAULT: Transaction-based upsert with vault management
     const encryptedEmail = encrypt(insertTarget.email);
     const encryptedName = encrypt(insertTarget.customerName);
     
-    return await db.transaction(async (tx) => {
+    // Core upsert logic - can run in external transaction or create its own
+    const executeUpsert = async (tx: DbTransaction): Promise<GhostTarget> => {
       // Check if ghost already exists
       const [existingGhost] = await tx
         .select()
@@ -864,6 +869,27 @@ export class DatabaseStorage implements IStorage {
         
         return decryptGhostTarget(dbRecord, vaultRecord);
       }
+    };
+    
+    // Use external transaction if provided, otherwise create a new one
+    if (externalTx) {
+      return await executeUpsert(externalTx);
+    } else {
+      return await db.transaction(async (tx) => executeUpsert(tx));
+    }
+  }
+
+  async batchUpsertGhostTargets(targets: InsertGhostTarget[]): Promise<GhostTarget[]> {
+    if (targets.length === 0) return [];
+    
+    // Atomic batch: All targets are committed in a single transaction
+    return await db.transaction(async (tx) => {
+      const results: GhostTarget[] = [];
+      for (const target of targets) {
+        const ghost = await this.upsertGhostTarget(target, tx);
+        results.push(ghost);
+      }
+      return results;
     });
   }
 
