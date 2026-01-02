@@ -1,8 +1,11 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
 import Decimal from "decimal.js";
+
+// Privacy Vault: Placeholder value for deprecated PII columns (satisfies NOT NULL constraints)
+const VAULT_MIGRATED_PLACEHOLDER = "VAULT_MIGRATED";
 
 // Rate limiting for Sentinel Auto-Pilot (Safety Valve: 50 emails/hour/merchant)
 const RATE_LIMIT_PER_HOUR = 50;
