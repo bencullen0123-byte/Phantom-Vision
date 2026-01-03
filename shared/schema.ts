@@ -319,6 +319,23 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 
+// Rate limits table - persisted rate limiting for email throttling
+// Survives server restarts to prevent spam violations
+export const rateLimits = pgTable("rate_limits", {
+  id: serial("id").primaryKey(),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
+  key: text("key").notNull(), // e.g., 'email_hourly'
+  count: integer("count").default(0).notNull(),
+  windowStart: bigint("window_start", { mode: "number" }).notNull(),
+});
+
+export const insertRateLimitSchema = createInsertSchema(rateLimits).omit({
+  id: true,
+});
+
+export type InsertRateLimit = z.infer<typeof insertRateLimitSchema>;
+export type RateLimit = typeof rateLimits.$inferSelect;
+
 // ============================================================================
 // DRIZZLE RELATIONS - Define table relationships for type-safe joins
 // ============================================================================

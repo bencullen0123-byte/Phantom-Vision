@@ -215,9 +215,9 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       }
       
       // Safety Valve: Rate limiting (50 emails/hour/merchant)
-      if (!canSendEmail(merchant.id)) {
+      if (!(await canSendEmail(merchant.id))) {
         result.rateLimited++;
-        const currentCount = getHourlyEmailCount(merchant.id);
+        const currentCount = await getHourlyEmailCount(merchant.id);
         console.log(`[SENTINEL] Rate limit reached for merchant ${merchant.id} (${currentCount}/${RATE_LIMIT_PER_HOUR}/hour)`);
         continue;
       }
@@ -240,7 +240,7 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       
       if (processResult.sent) {
         result.emailsSent++;
-        incrementHourlyEmailCount(merchant.id);
+        await incrementHourlyEmailCount(merchant.id);
         
         // Log Sentinel action for audit trail
         await logSentinelAction(target, merchant, true, processResult.dryRun);

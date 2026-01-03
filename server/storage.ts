@@ -1,4 +1,4 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, rateLimits, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
@@ -12,33 +12,69 @@ const VAULT_MIGRATED_PLACEHOLDER = "VAULT_MIGRATED";
 
 // Rate limiting for Sentinel Auto-Pilot (Safety Valve: 50 emails/hour/merchant)
 const RATE_LIMIT_PER_HOUR = 50;
-const rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
+const RATE_LIMIT_KEY = "email_hourly";
+const HOUR_IN_MS = 60 * 60 * 1000;
 
-function getHourlyEmailCount(merchantId: string): number {
+async function getHourlyEmailCount(merchantId: string): Promise<number> {
   const now = Date.now();
-  const hourInMs = 60 * 60 * 1000;
-  const record = rateLimitTracker.get(merchantId);
   
-  if (!record || (now - record.windowStart) > hourInMs) {
+  const [record] = await db
+    .select()
+    .from(rateLimits)
+    .where(and(
+      eq(rateLimits.merchantId, merchantId),
+      eq(rateLimits.key, RATE_LIMIT_KEY)
+    ));
+  
+  if (!record) {
     return 0;
   }
+  
+  // Check if window has expired
+  if ((now - record.windowStart) > HOUR_IN_MS) {
+    return 0;
+  }
+  
   return record.count;
 }
 
-function incrementHourlyEmailCount(merchantId: string): void {
+async function incrementHourlyEmailCount(merchantId: string): Promise<void> {
   const now = Date.now();
-  const hourInMs = 60 * 60 * 1000;
-  const record = rateLimitTracker.get(merchantId);
   
-  if (!record || (now - record.windowStart) > hourInMs) {
-    rateLimitTracker.set(merchantId, { count: 1, windowStart: now });
+  const [existingRecord] = await db
+    .select()
+    .from(rateLimits)
+    .where(and(
+      eq(rateLimits.merchantId, merchantId),
+      eq(rateLimits.key, RATE_LIMIT_KEY)
+    ));
+  
+  if (!existingRecord) {
+    // Create new record
+    await db.insert(rateLimits).values({
+      merchantId,
+      key: RATE_LIMIT_KEY,
+      count: 1,
+      windowStart: now,
+    });
+  } else if ((now - existingRecord.windowStart) > HOUR_IN_MS) {
+    // Window expired, reset counter
+    await db
+      .update(rateLimits)
+      .set({ count: 1, windowStart: now })
+      .where(eq(rateLimits.id, existingRecord.id));
   } else {
-    record.count++;
+    // Window active, increment counter
+    await db
+      .update(rateLimits)
+      .set({ count: existingRecord.count + 1 })
+      .where(eq(rateLimits.id, existingRecord.id));
   }
 }
 
-function canSendEmail(merchantId: string): boolean {
-  return getHourlyEmailCount(merchantId) < RATE_LIMIT_PER_HOUR;
+async function canSendEmail(merchantId: string): Promise<boolean> {
+  const count = await getHourlyEmailCount(merchantId);
+  return count < RATE_LIMIT_PER_HOUR;
 }
 
 export { getHourlyEmailCount, incrementHourlyEmailCount, canSendEmail, RATE_LIMIT_PER_HOUR };
