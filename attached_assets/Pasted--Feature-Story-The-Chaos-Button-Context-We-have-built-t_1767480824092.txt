@@ -1,0 +1,83 @@
+# Feature Story: The Chaos Button
+
+**Context**
+We have built the "Synthetic Chaos Engine" API (`POST /api/seed`), but currently, it can only be triggered via command line. We need a UI button in the Settings page so we can instantly populate the dashboard with demo data during presentations.
+
+**Target File:** `client/src/pages/SettingsPage.tsx`
+
+**Implementation Plan**
+
+**1. Define the Component**
+Add this new component definition before the main `SettingsPage` function (around line 430):
+
+```typescript
+function SimulationEngine() {
+  const { toast } = useToast();
+  const { refetch } = useMerchant();
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/seed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Simulation Complete",
+        description: `Generated ${data.count} synthetic payment failures.`,
+      });
+      // Refresh all data queries to show the new charts immediately
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Simulation Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Card className="bg-slate-900 border-white/10">
+      <CardContent className="pt-6">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <Zap className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="flex-1 space-y-3">
+            <div>
+              <h3 className="text-lg font-medium text-white mb-1">Chaos Engine</h3>
+              <p className="text-slate-400 text-sm">
+                Inject 150+ synthetic data points to stress-test the forensic charts.
+                <span className="block text-xs text-amber-500/80 mt-1">
+                  Warning: This will clear existing ghost data.
+                </span>
+              </p>
+            </div>
+            
+            <Button 
+              variant="outline" 
+              className="border-amber-500/20 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 w-full sm:w-auto"
+              onClick={() => seedMutation.mutate()}
+              disabled={seedMutation.isPending}
+            >
+              {seedMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating Entropy...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 mr-2" />
+                  Ignite Simulation
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
