@@ -8,6 +8,7 @@ import { handleWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
 import { runSeeder } from "./services/seeder";
 import { clerkAuth, syncClerkMerchant, requireClerkMerchant } from "./middleware/clerk";
+import { helmetConfig, globalLimiter, scanLimiter } from "./middleware/security";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 import { z } from "zod";
@@ -80,6 +81,12 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  // Apply security headers first (before any routes)
+  app.use(helmetConfig);
+  
+  // Apply global rate limiting to all API routes
+  app.use("/api", globalLimiter);
   
   // Apply Clerk authentication middleware globally to /api/* routes
   app.use("/api", clerkAuth, syncClerkMerchant);
@@ -302,9 +309,10 @@ export async function registerRoutes(
     }
   });
 
-  // Scan endpoint - creates a scan job for async processing (secured by session)
+  // Scan endpoint - creates a scan job for async processing (secured by Clerk auth)
   // Returns 202 Accepted immediately with job ID for status polling
-  app.post("/api/scan", requireClerkMerchant, async (req: Request, res: Response) => {
+  // Protected by scanLimiter (10 requests per hour) due to expensive Stripe API calls
+  app.post("/api/scan", requireClerkMerchant, scanLimiter, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
     
     // Validate request body with Zod
