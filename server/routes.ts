@@ -7,7 +7,7 @@ import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
 import { runSeeder } from "./services/seeder";
-import { requireMerchant } from "./middleware/auth";
+import { clerkAuth, syncClerkMerchant, requireClerkMerchant } from "./middleware/clerk";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 import { z } from "zod";
@@ -81,6 +81,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // Apply Clerk authentication middleware globally to /api/* routes
+  app.use("/api", clerkAuth, syncClerkMerchant);
+  
   // Health check endpoint with vault status
   app.get("/api/health", (_req, res) => {
     res.json({ 
@@ -92,14 +95,32 @@ export async function registerRoutes(
     });
   });
 
-  // Auth status endpoint - checks if user has active session
+  // Auth status endpoint - checks if user is signed in via Clerk and has linked merchant
   app.get("/api/auth/status", (req: Request, res: Response) => {
-    const merchantId = req.session?.merchantId;
+    const clerkUserId = req.auth?.userId;
+    const merchant = req.merchant;
     
-    if (merchantId) {
+    if (clerkUserId && merchant) {
       return res.json({
         authenticated: true,
-        merchantId
+        merchantId: merchant.id,
+        clerkUserId,
+        merchant: {
+          id: merchant.id,
+          businessName: merchant.businessName,
+          supportEmail: merchant.supportEmail,
+          autoPilotEnabled: merchant.autoPilotEnabled,
+          brandColor: merchant.brandColor,
+        }
+      });
+    }
+    
+    if (clerkUserId) {
+      return res.json({
+        authenticated: true,
+        merchantId: null,
+        clerkUserId,
+        needsStripeConnect: true
       });
     }
     
@@ -178,8 +199,10 @@ export async function registerRoutes(
   });
 
   // Stripe OAuth callback - receives authorization code and exchanges for token
+  // Links Clerk user ID with merchant record for identity bridging
   app.get("/api/auth/callback", async (req: Request, res: Response) => {
     const { code, error, error_description, state } = req.query;
+    const clerkUserId = req.auth?.userId;
 
     // Validate state parameter for CSRF protection
     const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
@@ -207,7 +230,13 @@ export async function registerRoutes(
       return res.redirect("/api/auth/error?reason=state_mismatch&description=" + encodeURIComponent("Security check failed - please try again"));
     }
 
-    console.log("[AUTH] State validation passed");
+    // Require Clerk authentication for Stripe Connect linking
+    if (!clerkUserId) {
+      console.error("[AUTH] No Clerk user ID - user must be signed in to connect Stripe");
+      return res.redirect("/api/auth/error?reason=not_authenticated&description=" + encodeURIComponent("Please sign in before connecting your Stripe account"));
+    }
+
+    console.log("[AUTH] State validation passed, Clerk user:", clerkUserId);
 
     // Check Stripe client availability
     const stripe = getStripeClient();
@@ -240,40 +269,30 @@ export async function registerRoutes(
         return res.redirect("/api/auth/error?reason=invalid_token&description=" + encodeURIComponent("Invalid token response from Stripe"));
       }
 
-      // Check if merchant already exists
+      // Check if merchant already exists (Scenario A: Re-connection)
       const existingMerchant = await storage.getMerchantByStripeUserId(stripe_user_id);
       
       if (existingMerchant) {
-        console.log("[AUTH] Merchant already authorized:", stripe_user_id);
-        req.session.merchantId = existingMerchant.id;
-        return req.session.save((err) => {
-          if (err) {
-            console.error("[AUTH] Session save error:", err);
-          }
-          res.redirect("/");
-        });
+        console.log("[AUTH] Merchant re-connection, linking Clerk ID:", clerkUserId);
+        // Update merchant with Clerk ID (Identity Link)
+        await storage.updateMerchant(existingMerchant.id, { clerkId: clerkUserId });
+        console.log("[AUTH] Merchant linked to Clerk user:", stripe_user_id, "->", clerkUserId);
+        return res.redirect("/");
       }
 
-      // Encrypt the access token using the Vault
+      // Scenario B: New User - create merchant with Clerk ID
       const { encryptedData, iv, tag } = encrypt(access_token);
 
-      // Store encrypted token in database
       const newMerchant = await storage.createMerchant({
         stripeUserId: stripe_user_id,
         encryptedToken: encryptedData,
         iv: iv,
         tag: tag,
+        clerkId: clerkUserId,
       });
 
-      console.log("[AUTH] New merchant authorized and stored:", stripe_user_id);
-      
-      req.session.merchantId = newMerchant.id;
-      req.session.save((err) => {
-        if (err) {
-          console.error("[AUTH] Session save error:", err);
-        }
-        res.redirect("/");
-      });
+      console.log("[AUTH] New merchant created and linked:", stripe_user_id, "->", clerkUserId);
+      return res.redirect("/");
 
     } catch (err: any) {
       console.error("[AUTH] Token exchange failed:", err);
@@ -285,7 +304,7 @@ export async function registerRoutes(
 
   // Scan endpoint - creates a scan job for async processing (secured by session)
   // Returns 202 Accepted immediately with job ID for status polling
-  app.post("/api/scan", requireMerchant, async (req: Request, res: Response) => {
+  app.post("/api/scan", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
     
     // Validate request body with Zod
@@ -443,7 +462,7 @@ export async function registerRoutes(
   });
 
   // Merchant Branding Update - PATCH endpoint for updating branding settings
-  app.patch("/api/merchant/branding", requireMerchant, async (req: Request, res: Response) => {
+  app.patch("/api/merchant/branding", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     // Validate request body with Zod
@@ -493,7 +512,7 @@ export async function registerRoutes(
   });
 
   // Merchant Stats API - returns Historical Revenue Intelligence (secured by session)
-  app.get("/api/merchant/stats", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/merchant/stats", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     const merchant = await storage.getMerchant(merchantId);
@@ -569,7 +588,7 @@ export async function registerRoutes(
   });
 
   // Diagnostic Pulse API - returns funnel metadata from last Ghost Hunter run
-  app.get("/api/diagnostic-pulse", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/diagnostic-pulse", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     try {
@@ -586,7 +605,7 @@ export async function registerRoutes(
   });
 
   // Golden Hour API - returns count of pending ghosts within optimal recovery window
-  app.get("/api/golden-hour", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/golden-hour", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     try {
@@ -603,7 +622,7 @@ export async function registerRoutes(
   });
 
   // Ghost Targets API - returns decrypted ghost targets for authenticated merchant
-  app.get("/api/merchant/ghosts", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/merchant/ghosts", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     try {
@@ -653,7 +672,7 @@ export async function registerRoutes(
   });
 
   // Leakage Forensics - aggregated failure categories for donut chart
-  app.get("/api/merchant/leakage-forensics", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/merchant/leakage-forensics", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
 
     try {
@@ -694,7 +713,7 @@ export async function registerRoutes(
   });
 
   // Intelligence Logs - returns decision transparency feed for merchant
-  app.get("/api/merchant/logs", requireMerchant, async (req: Request, res: Response) => {
+  app.get("/api/merchant/logs", requireClerkMerchant, async (req: Request, res: Response) => {
     const merchantId = req.merchantId!;
     const limit = Math.min(Number(req.query.limit) || 50, 100);
 
