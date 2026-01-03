@@ -66,6 +66,10 @@ export const merchants = pgTable("merchants", {
   totalVettedCount: integer("total_vetted_count").default(0).notNull(),
   // Clerk Managed Identity: links to Clerk user for SSO authentication
   clerkId: varchar("clerk_id").unique(),
+  // Platform Billing (The Cash Register)
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  subscriptionStatus: text("subscription_status").default("free").notNull(),
+  planTier: text("plan_tier").default("starter").notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
