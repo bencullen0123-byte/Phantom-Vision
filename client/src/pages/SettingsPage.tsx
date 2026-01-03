@@ -605,7 +605,7 @@ function SimulationEngine() {
 
   const seedMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/seed");
+      const res = await apiRequest("POST", "/api/dev/seed-scenarios");
       return res.json();
     },
     onSuccess: (data: { created?: { ghosts?: number } }) => {
