@@ -8,6 +8,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ForensicCharts from "@/components/ForensicCharts";
 import DiagnosticTrident from "@/components/DiagnosticTrident";
+import ScanProgress from "@/components/ScanProgress";
 
 function ConnectStripeGate() {
   return (
@@ -256,6 +257,7 @@ function DashboardMetrics() {
 
   return (
     <div className="space-y-6">
+      <ScanProgress />
       <DiagnosticTrident />
       
       <ConversionFunnel 
