@@ -11,6 +11,8 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.59.2",
+    "@clerk/clerk-sdk-node": "^4.13.23",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^1.0.2",

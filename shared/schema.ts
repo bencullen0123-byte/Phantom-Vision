@@ -64,6 +64,8 @@ export const merchants = pgTable("merchants", {
   lastAuditStatus: text("last_audit_status").default("idle").notNull(),
   // Cumulative Audit Proof: Total invoices ever vetted by Ghost Hunter
   totalVettedCount: integer("total_vetted_count").default(0).notNull(),
+  // Clerk Managed Identity: links to Clerk user for SSO authentication
+  clerkId: varchar("clerk_id").unique(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
