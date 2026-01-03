@@ -451,6 +451,70 @@ export async function handleSubscriptionUpdated(subscription: Stripe.Subscriptio
   };
 }
 
+// Handle checkout.session.completed - upgrades merchant to Pro tier
+export async function handleCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session
+): Promise<WebhookResult> {
+  console.log(`[WEBHOOK] Processing checkout.session.completed for session ${session.id}`);
+
+  const merchantId = session.client_reference_id;
+  if (!merchantId) {
+    console.error(`[WEBHOOK] No client_reference_id in checkout session ${session.id}`);
+    return {
+      success: false,
+      message: "Missing merchant reference in checkout session",
+    };
+  }
+
+  const subscriptionId = typeof session.subscription === 'string'
+    ? session.subscription
+    : session.subscription?.id || null;
+
+  if (!subscriptionId) {
+    console.error(`[WEBHOOK] No subscription ID in checkout session ${session.id}`);
+    return {
+      success: false,
+      message: "Missing subscription in checkout session",
+    };
+  }
+
+  console.log(`[WEBHOOK] Upgrading merchant ${merchantId} to Pro tier`);
+
+  try {
+    await storage.updateMerchant(merchantId, {
+      stripeSubscriptionId: subscriptionId,
+      subscriptionStatus: 'active',
+      planTier: 'pro',
+      tierLimit: 1000,
+    });
+
+    console.log(`[WEBHOOK] Merchant ${merchantId} upgraded to Pro (tierLimit: 1000)`);
+
+    await storage.createSystemLog({
+      jobName: "billing_upgrade",
+      status: "success",
+      details: JSON.stringify({
+        type: "pro_upgrade",
+        merchantId,
+        subscriptionId,
+        newTierLimit: 1000,
+      }),
+      errorMessage: null,
+    });
+
+    return {
+      success: true,
+      message: `Merchant ${merchantId} upgraded to Pro`,
+    };
+  } catch (error: any) {
+    console.error(`[WEBHOOK] Failed to upgrade merchant ${merchantId}:`, error.message);
+    return {
+      success: false,
+      message: `Failed to upgrade merchant: ${error.message}`,
+    };
+  }
+}
+
 export async function handleWebhookEvent(
   event: Stripe.Event
 ): Promise<WebhookResult> {
@@ -472,6 +536,10 @@ export async function handleWebhookEvent(
     case "customer.subscription.updated":
       const subscription = event.data.object as Stripe.Subscription;
       return handleSubscriptionUpdated(subscription);
+
+    case "checkout.session.completed":
+      const checkoutSession = event.data.object as Stripe.Checkout.Session;
+      return handleCheckoutSessionCompleted(checkoutSession);
 
     default:
       console.log(`[WEBHOOK] Ignoring event type: ${event.type}`);
