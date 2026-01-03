@@ -390,6 +390,34 @@ export async function registerRoutes(
     });
   });
 
+  // Active Scan Status - returns current pending/processing job for merchant
+  app.get("/api/scan/active", requireClerkMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const job = await storage.getMerchantPendingJob(merchantId);
+
+      if (!job) {
+        return res.json({ active: false });
+      }
+
+      return res.json({
+        active: true,
+        jobId: job.id,
+        progress: job.progress,
+        status: job.status,
+        createdAt: job.createdAt,
+      });
+    } catch (error: any) {
+      console.error("[SCAN] Failed to get active scan status:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve scan status",
+        error: error.message
+      });
+    }
+  });
+
   // Pulse endpoint - triggers recovery email queue processing
   app.get("/api/pulse/run", async (_req: Request, res: Response) => {
     console.log("[PULSE] Manual trigger initiated");
