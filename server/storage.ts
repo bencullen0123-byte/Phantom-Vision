@@ -1,4 +1,4 @@
-import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, rateLimits, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog } from "@shared/schema";
+import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, rateLimits, notifications, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog, type Notification, type InsertNotification } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
 import { encrypt, decrypt } from "./utils/crypto";
@@ -390,6 +390,12 @@ export interface IStorage {
   
   // Audit Logs (Compliance & Debugging Trail)
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  
+  // Notifications (Victory Lap)
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getNotifications(merchantId: string): Promise<Notification[]>;
+  markNotificationRead(id: number): Promise<Notification | undefined>;
+  countUnreadNotifications(merchantId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1095,11 +1101,27 @@ export class DatabaseStorage implements IStorage {
       }),
     });
     
-    // Fetch vault record for hybrid decryption
+    // Fetch vault record for hybrid decryption and notification message
     const vaultRecord = dbRecord.piiVaultId 
       ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
       : null;
-    return decryptGhostTarget(dbRecord, vaultRecord);
+    const ghost = decryptGhostTarget(dbRecord, vaultRecord);
+    
+    // Victory Lap: Create notification for merchant
+    const amountFormatted = new Intl.NumberFormat('en-US', { 
+      style: 'currency', 
+      currency: dbRecord.currency?.toUpperCase() || 'USD' 
+    }).format((dbRecord.amount || 0) / 100);
+    const customerName = ghost.customerName || 'a customer';
+    
+    await this.createNotification({
+      merchantId: dbRecord.merchantId,
+      type: 'recovery',
+      message: `Ghost Exorcised! Recovered ${amountFormatted} from ${customerName}.`,
+      read: false,
+    });
+    
+    return ghost;
   }
 
   async markGhostExhausted(id: string): Promise<GhostTarget | undefined> {
@@ -1666,6 +1688,47 @@ export class DatabaseStorage implements IStorage {
       .values(log)
       .returning();
     return auditLog;
+  }
+
+  // ============================================================================
+  // NOTIFICATIONS (Victory Lap)
+  // ============================================================================
+  
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [notif] = await db
+      .insert(notifications)
+      .values(notification)
+      .returning();
+    return notif;
+  }
+  
+  async getNotifications(merchantId: string): Promise<Notification[]> {
+    return await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.merchantId, merchantId))
+      .orderBy(desc(notifications.read), desc(notifications.createdAt))
+      .limit(50);
+  }
+  
+  async markNotificationRead(id: number): Promise<Notification | undefined> {
+    const [updated] = await db
+      .update(notifications)
+      .set({ read: true })
+      .where(eq(notifications.id, id))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async countUnreadNotifications(merchantId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(notifications)
+      .where(and(
+        eq(notifications.merchantId, merchantId),
+        eq(notifications.read, false)
+      ));
+    return result?.count || 0;
   }
 }
 
