@@ -27,6 +27,7 @@ import { useMerchant } from "@/context/MerchantContext";
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { useToast } from "@/hooks/use-toast";
 import { useScanJob } from "@/hooks/use-scan-job";
+import NotificationsBell from "@/components/NotificationsBell";
 
 interface NavItem {
   label: string;
@@ -287,6 +288,8 @@ function GlobalHeader() {
             {formatRelativeTime(lastAudit)}
           </span>
         </div>
+        
+        <NotificationsBell />
       </div>
     </header>
   );
