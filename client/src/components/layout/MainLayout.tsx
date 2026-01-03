@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Settings, DollarSign, LogOut, Clock, Shield, RefreshCw, Loader2 } from "lucide-react";
+import { UserButton } from "@clerk/clerk-react";
+import { LayoutDashboard, Settings, DollarSign, Clock, Shield, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -121,15 +122,6 @@ function AppSidebar() {
   const isCollapsed = state === "collapsed";
   const autoPilotEnabled = merchant?.autoPilotEnabled ?? false;
 
-  const handleLogout = async () => {
-    try {
-      await apiRequest("POST", "/api/auth/logout");
-      window.location.href = "/";
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-  };
-
   return (
     <Sidebar collapsible="icon" className="border-r border-white/10 bg-obsidian">
       <SidebarHeader className="p-4">
@@ -166,29 +158,15 @@ function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-2">
-        {isAuthenticated && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={isCollapsed ? "icon" : "default"}
-                onClick={handleLogout}
-                className="w-full text-slate-400 hover:text-white justify-start gap-2"
-                data-testid="button-logout"
-              >
-                <LogOut className="w-4 h-4 shrink-0" />
-                <span className={`transition-opacity duration-150 ${isCollapsed ? "opacity-0 w-0 hidden" : "opacity-100"}`}>
-                  Logout
-                </span>
-              </Button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" className="bg-slate-900 border-white/10">
-                Logout
-              </TooltipContent>
-            )}
-          </Tooltip>
-        )}
+        <div className={`flex ${isCollapsed ? "justify-center" : "justify-start px-2"}`} data-testid="user-profile-button">
+          <UserButton 
+            appearance={{
+              elements: {
+                avatarBox: "w-8 h-8",
+              }
+            }}
+          />
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
