@@ -340,6 +340,25 @@ export const insertRateLimitSchema = createInsertSchema(rateLimits).omit({
 export type InsertRateLimit = z.infer<typeof insertRateLimitSchema>;
 export type RateLimit = typeof rateLimits.$inferSelect;
 
+// Notifications table - Victory Lap: celebrate recoveries with merchants
+// type: 'recovery' | 'system' | 'billing'
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  merchantId: varchar("merchant_id").notNull().references(() => merchants.id),
+  type: text("type").notNull(),
+  message: text("message").notNull(),
+  read: boolean("read").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
 // ============================================================================
 // DRIZZLE RELATIONS - Define table relationships for type-safe joins
 // ============================================================================
