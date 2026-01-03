@@ -418,6 +418,64 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================================================
+  // NOTIFICATIONS (Victory Lap)
+  // ============================================================================
+  
+  // Get notifications for merchant (unread first, then latest read)
+  app.get("/api/notifications", requireClerkMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+    
+    try {
+      const [notifs, unreadCount] = await Promise.all([
+        storage.getNotifications(merchantId),
+        storage.countUnreadNotifications(merchantId)
+      ]);
+      
+      return res.json({
+        notifications: notifs,
+        unreadCount
+      });
+    } catch (error: any) {
+      console.error("[NOTIFICATIONS] Failed to get notifications:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve notifications"
+      });
+    }
+  });
+  
+  // Mark notification as read
+  app.patch("/api/notifications/:id/read", requireClerkMerchant, async (req: Request, res: Response) => {
+    const notificationId = parseInt(req.params.id, 10);
+    
+    if (isNaN(notificationId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid notification ID"
+      });
+    }
+    
+    try {
+      const updated = await storage.markNotificationRead(notificationId);
+      
+      if (!updated) {
+        return res.status(404).json({
+          status: "error",
+          message: "Notification not found"
+        });
+      }
+      
+      return res.json({ success: true, notification: updated });
+    } catch (error: any) {
+      console.error("[NOTIFICATIONS] Failed to mark notification read:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to update notification"
+      });
+    }
+  });
+
   // Pulse endpoint - triggers recovery email queue processing
   app.get("/api/pulse/run", async (_req: Request, res: Response) => {
     console.log("[PULSE] Manual trigger initiated");

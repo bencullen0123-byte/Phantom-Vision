@@ -1107,10 +1107,13 @@ export class DatabaseStorage implements IStorage {
       : null;
     const ghost = decryptGhostTarget(dbRecord, vaultRecord);
     
+    // Fetch merchant for currency formatting
+    const merchant = await this.getMerchant(dbRecord.merchantId);
+    
     // Victory Lap: Create notification for merchant
     const amountFormatted = new Intl.NumberFormat('en-US', { 
       style: 'currency', 
-      currency: dbRecord.currency?.toUpperCase() || 'USD' 
+      currency: merchant?.defaultCurrency?.toUpperCase() || 'USD' 
     }).format((dbRecord.amount || 0) / 100);
     const customerName = ghost.customerName || 'a customer';
     
