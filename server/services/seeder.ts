@@ -2,6 +2,9 @@ import Stripe from "stripe";
 import { storage } from "../storage";
 import { decrypt, redactEmail } from "../utils/crypto";
 import { determineRecoveryStrategy } from "./ghostHunter";
+import { db } from "../db";
+import { ghostTargets, piiVault } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const TEST_MERCHANT_ID = "395d4e40-7daf-4d55-9843-78403f2bc9fd";
 const PRODUCT_NAME = "PHANTOM Test Tier";
@@ -353,6 +356,15 @@ export async function runSeeder(): Promise<SeederResult> {
   const { productId } = await getOrCreateProduct(stripe);
   
   console.log("[CHAOS ENGINE] Beginning Synthetic Ghost Generation...");
+  
+  // WIPE-ON-SEED: Atomic delete of existing ghosts for clean audit state
+  console.log("[CHAOS ENGINE] Wiping existing ghost data for clean slate...");
+  const deleteResult = await db.delete(ghostTargets).where(eq(ghostTargets.merchantId, TEST_MERCHANT_ID));
+  console.log(`[CHAOS ENGINE] Deleted existing ghosts for merchant ${TEST_MERCHANT_ID}`);
+  
+  // Also clear orphaned PII vault entries for this merchant
+  await db.delete(piiVault).where(eq(piiVault.merchantId, TEST_MERCHANT_ID));
+  console.log("[CHAOS ENGINE] Cleared PII vault entries");
   
   const result = await generateAndInsertSyntheticGhosts(TEST_MERCHANT_ID);
   errors.push(...result.errors);
