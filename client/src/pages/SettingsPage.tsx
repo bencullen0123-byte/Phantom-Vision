@@ -599,6 +599,73 @@ function MerchantProfileForm() {
   );
 }
 
+function SimulationEngine() {
+  const { toast } = useToast();
+  const { refetch } = useMerchant();
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/seed");
+      return res.json();
+    },
+    onSuccess: (data: { created?: { ghosts?: number } }) => {
+      const count = data?.created?.ghosts || 0;
+      toast({ 
+        title: "Simulation Complete", 
+        description: `Generated ${count} synthetic failures.` 
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ghosts"] });
+      refetch();
+    },
+    onError: (e: Error) => {
+      toast({ 
+        title: "Simulation Failed", 
+        description: e.message, 
+        variant: "destructive" 
+      });
+    }
+  });
+
+  return (
+    <Card className="bg-slate-900 border-amber-500/20">
+      <CardContent className="pt-6">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+            <Zap className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-medium text-white mb-1">Chaos Engine</h3>
+            <p className="text-slate-400 text-sm mb-3">
+              Inject 150+ synthetic payment failures for stress testing and demos.
+            </p>
+            <Button 
+              variant="outline" 
+              className="border-amber-500/50 text-amber-400"
+              onClick={() => seedMutation.mutate()}
+              disabled={seedMutation.isPending}
+              data-testid="button-ignite-simulation"
+            >
+              {seedMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 mr-2" />
+                  Ignite Simulation
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DiagnosticOperations() {
   const { toast } = useToast();
   const { startScan, status, progress, isScanning, error } = useScanJob();
@@ -703,6 +770,10 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {isAuthenticated && merchant && (
           <DiagnosticOperations />
+        )}
+
+        {isAuthenticated && merchant && (
+          <SimulationEngine />
         )}
 
         {isAuthenticated && merchant && (
