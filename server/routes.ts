@@ -738,6 +738,107 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================================================
+  // BILLING ENDPOINTS (The Cash Register)
+  // ============================================================================
+
+  // Create Checkout Session - initiates Stripe Checkout for Pro upgrade
+  app.post("/api/billing/checkout", requireClerkMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+    
+    console.log(`[BILLING] Creating checkout session for merchant ${merchantId}`);
+    
+    const stripe = getStripeClient();
+    if (!stripe) {
+      console.error("[BILLING] Stripe client not initialized");
+      return res.status(500).json({
+        status: "error",
+        message: "Billing service unavailable"
+      });
+    }
+
+    const priceId = process.env.STRIPE_PRO_PRICE_ID;
+    if (!priceId) {
+      console.error("[BILLING] STRIPE_PRO_PRICE_ID not configured");
+      return res.status(500).json({
+        status: "error",
+        message: "Pro plan not configured"
+      });
+    }
+
+    try {
+      const merchant = await storage.getMerchant(merchantId);
+      if (!merchant) {
+        return res.status(404).json({ status: "error", message: "Merchant not found" });
+      }
+
+      // Determine base URL for redirects
+      const protocol = req.headers['x-forwarded-proto'] || 'https';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const baseUrl = `${protocol}://${host}`;
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        client_reference_id: merchantId,
+        success_url: `${baseUrl}/settings?success=true`,
+        cancel_url: `${baseUrl}/settings?canceled=true`,
+        metadata: {
+          merchantId,
+          planTier: 'pro',
+        },
+      });
+
+      console.log(`[BILLING] Checkout session created: ${session.id} for merchant ${merchantId}`);
+
+      return res.json({
+        status: "success",
+        checkoutUrl: session.url,
+      });
+    } catch (error: any) {
+      console.error("[BILLING] Failed to create checkout session:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to create checkout session",
+        error: error.message
+      });
+    }
+  });
+
+  // Get current billing status
+  app.get("/api/billing/status", requireClerkMerchant, async (req: Request, res: Response) => {
+    const merchantId = req.merchantId!;
+
+    try {
+      const merchant = await storage.getMerchant(merchantId);
+      if (!merchant) {
+        return res.status(404).json({ status: "error", message: "Merchant not found" });
+      }
+
+      return res.json({
+        status: "success",
+        billing: {
+          planTier: merchant.planTier,
+          subscriptionStatus: merchant.subscriptionStatus,
+          tierLimit: merchant.tierLimit,
+          hasSubscription: !!merchant.stripeSubscriptionId,
+        },
+      });
+    } catch (error: any) {
+      console.error("[BILLING] Failed to get billing status:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve billing status",
+        error: error.message
+      });
+    }
+  });
+
   // System Health endpoint - returns scheduler status and recent logs
   app.get("/api/system/health", async (_req: Request, res: Response) => {
     try {
