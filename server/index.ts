@@ -131,6 +131,11 @@ app.use((req, res, next) => {
   // Start the background job worker for async scan processing
   startJobWorker();
 
+  // Environment validation warnings
+  if (!process.env.CRON_SECRET) {
+    console.warn("[PHANTOM] WARNING: CRON_SECRET not set - external cron trigger API disabled");
+  }
+
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.

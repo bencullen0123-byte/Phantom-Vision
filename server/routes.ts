@@ -8,7 +8,7 @@ import { handleWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
 import { runSeeder } from "./services/seeder";
 import { clerkAuth, syncClerkMerchant, requireClerkMerchant } from "./middleware/clerk";
-import { helmetConfig, globalLimiter, scanLimiter } from "./middleware/security";
+import { helmetConfig, globalLimiter, scanLimiter, requireCronSecret } from "./middleware/security";
 import { randomBytes } from "crypto";
 import Stripe from "stripe";
 import { z } from "zod";
@@ -971,6 +971,41 @@ export async function registerRoutes(
       return res.json({ status: "success", message: "Pulse Engine job triggered" });
     } catch (error: any) {
       return res.status(500).json({ status: "error", error: error.message });
+    }
+  });
+
+  // External Cron Trigger - The Heartbeat (secure external scheduler invocation)
+  app.post("/api/system/cron-trigger", requireCronSecret, async (req: Request, res: Response) => {
+    const { job } = req.body;
+    
+    if (!job || !["ghost_hunter", "pulse_engine"].includes(job)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid job. Must be 'ghost_hunter' or 'pulse_engine'"
+      });
+    }
+
+    console.log(`[HEARTBEAT] External cron trigger received for: ${job}`);
+
+    try {
+      if (job === "ghost_hunter") {
+        await runGhostHunterJob();
+      } else {
+        await runPulseEngineJob();
+      }
+
+      return res.json({
+        status: "success",
+        job,
+        message: `${job} job completed successfully`
+      });
+    } catch (error: any) {
+      console.error(`[HEARTBEAT] ${job} failed:`, error.message);
+      return res.status(500).json({
+        status: "error",
+        job,
+        error: error.message
+      });
     }
   });
 

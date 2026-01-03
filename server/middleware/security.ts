@@ -1,5 +1,23 @@
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import type { Request, Response, NextFunction } from "express";
+
+export function requireCronSecret(req: Request, res: Response, next: NextFunction) {
+  const secret = req.headers["x-cron-secret"];
+  const expectedSecret = process.env.CRON_SECRET;
+
+  if (!expectedSecret) {
+    console.error("[SECURITY] CRON_SECRET not configured - cron trigger disabled");
+    return res.status(503).json({ error: "Cron trigger not configured" });
+  }
+
+  if (secret !== expectedSecret) {
+    console.warn("[SECURITY] Invalid cron secret attempt");
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+}
 
 export const helmetConfig = helmet({
   contentSecurityPolicy: {
