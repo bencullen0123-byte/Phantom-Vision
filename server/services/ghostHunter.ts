@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import Decimal from "decimal.js";
 import { storage } from "../storage";
 import { decrypt, vaultDiagnostic, redactEmail } from "../utils/crypto";
+import { stripeCircuitBreaker } from "../utils/circuitBreaker";
 import type { Merchant, InsertGhostTarget } from "@shared/schema";
 
 // Diagnostic Shell Constants
@@ -195,7 +196,8 @@ async function withRetry<T>(
   backoff: number = INITIAL_BACKOFF_MS
 ): Promise<T> {
   try {
-    return await fn();
+    // Wrap Stripe calls with circuit breaker to prevent cascading failures
+    return await stripeCircuitBreaker.call(fn);
   } catch (error: any) {
     if (retries > 0 && isStripeRateLimitError(error)) {
       console.log(`[GHOST HUNTER] StripeRateLimitError detected, sleeping ${RATE_LIMIT_RETRY_MS}ms before retry...`);

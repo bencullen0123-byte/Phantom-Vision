@@ -4,6 +4,7 @@
 import { Resend } from 'resend';
 import type { Merchant, GhostTarget } from '@shared/schema';
 import { redactEmail } from '../utils/crypto';
+import { mailerCircuitBreaker } from '../utils/circuitBreaker';
 
 let connectionSettings: any;
 
@@ -446,14 +447,17 @@ export async function sendPulseEmail(
     const { client, fromEmail } = await getUncachableResendClient();
     const replyTo = merchant.supportEmail || undefined;
 
-    const result = await client.emails.send({
-      from: `${businessName} <${fromEmail}>`,
-      to: [target.email],
-      replyTo: replyTo,
-      subject: subject,
-      html: htmlContent,
-      text: textContent,
-    });
+    // Wrap mailer calls with circuit breaker to prevent cascading failures
+    const result = await mailerCircuitBreaker.call(() => 
+      client.emails.send({
+        from: `${businessName} <${fromEmail}>`,
+        to: [target.email],
+        replyTo: replyTo,
+        subject: subject,
+        html: htmlContent,
+        text: textContent,
+      })
+    );
 
     if (result.error) {
       console.error(`[PULSE MAILER] Resend error:`, result.error);
@@ -520,14 +524,17 @@ export async function sendRecoveryEmail(
     const { client, fromEmail } = await getUncachableResendClient();
     const replyTo = merchant.supportEmail || undefined;
 
-    const result = await client.emails.send({
-      from: `${businessName} <${fromEmail}>`,
-      to: [to],
-      replyTo: replyTo,
-      subject: subject,
-      html: htmlContent,
-      text: textContent,
-    });
+    // Wrap mailer calls with circuit breaker to prevent cascading failures
+    const result = await mailerCircuitBreaker.call(() =>
+      client.emails.send({
+        from: `${businessName} <${fromEmail}>`,
+        to: [to],
+        replyTo: replyTo,
+        subject: subject,
+        html: htmlContent,
+        text: textContent,
+      })
+    );
 
     if (result.error) {
       console.error(`[PULSE MAILER] Resend error:`, result.error);
