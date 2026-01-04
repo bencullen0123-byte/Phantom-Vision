@@ -516,17 +516,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMerchantStats(merchantId: string): Promise<MerchantStats> {
-    const totalGhosts = await this.countGhostsByMerchant(merchantId);
-    const activeGhosts = await this.countActiveGhostsByMerchant(merchantId);
-    const recoveredCount = await this.countRecoveredGhostsByMerchant(merchantId);
-    
-    // Live aggregate: sum recovered amounts from ghost_targets
-    const recoveredResult = await db.execute(sql`
-      SELECT COALESCE(SUM(amount), 0)::bigint AS total
+    // SQL-LEVEL AGGREGATION: Single query with COUNT/SUM grouped by status
+    // Eliminates 4 separate queries, uses database indexes efficiently
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*)::bigint AS total_ghosts,
+        COUNT(CASE WHEN status IN ('pending', 'active', 'ghost') THEN 1 END)::bigint AS active_ghosts,
+        COUNT(CASE WHEN status = 'recovered' THEN 1 END)::bigint AS recovered_count,
+        COALESCE(SUM(CASE WHEN status = 'recovered' THEN amount ELSE 0 END), 0)::bigint AS total_recovered_cents
       FROM ghost_targets
-      WHERE merchant_id = ${merchantId} AND status = 'recovered'
+      WHERE merchant_id = ${merchantId}
+        AND status != 'terminal'
     `);
-    const totalRecoveredCents = Number((recoveredResult.rows[0] as any)?.total || 0);
+    
+    const row = result.rows[0] as any;
+    const totalGhosts = Number(row?.total_ghosts || 0);
+    const activeGhosts = Number(row?.active_ghosts || 0);
+    const recoveredCount = Number(row?.recovered_count || 0);
+    const totalRecoveredCents = Number(row?.total_recovered_cents || 0);
     
     // FINANCIAL MATH REMEDIATION: Use Decimal.js for precise rate calculation
     const recoveryRate = totalGhosts > 0 
