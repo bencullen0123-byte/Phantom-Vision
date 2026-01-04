@@ -24,14 +24,28 @@ export async function syncClerkMerchant(
   next: NextFunction
 ) {
   try {
+    const orgId = req.auth?.orgId;
     const userId = req.auth?.userId;
     
-    if (userId) {
-      const merchant = await storage.getMerchantByClerkId(userId);
-      if (merchant) {
-        req.merchant = merchant;
-        req.merchantId = merchant.id;
-      }
+    let merchant: Merchant | undefined;
+    
+    // IDOR Prevention: Resolve merchant ONLY from verified token claims
+    // Priority: Organization ID > User ID (supports B2B multi-tenant scenarios)
+    // CRITICAL: Never source merchantId from req.body or req.query
+    
+    if (orgId) {
+      // B2B path: Organization-based resolution
+      merchant = await storage.getMerchantByOrgId(orgId);
+    }
+    
+    if (!merchant && userId) {
+      // Fallback: Individual user resolution
+      merchant = await storage.getMerchantByClerkId(userId);
+    }
+    
+    if (merchant) {
+      req.merchant = merchant;
+      req.merchantId = merchant.id;
     }
     
     next();
