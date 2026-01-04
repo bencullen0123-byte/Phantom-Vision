@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -174,7 +174,11 @@ export const ghostTargets = pgTable("ghost_targets", {
   // VAMP Compliance Kill-Switch (Phase 3.2): reason for terminal status
   // Set when status='terminal' to document why engagement was permanently stopped
   terminationReason: text("termination_reason"),
-});
+}, (table) => [
+  // Performance indexes for Titanium-Fast dashboard
+  index("ghost_targets_merchant_status_idx").on(table.merchantId, table.status),
+  index("ghost_targets_status_discovered_idx").on(table.status, table.discoveredAt),
+]);
 
 // Internal schema for database operations (uses encrypted fields)
 export const insertGhostTargetDbSchema = createInsertSchema(ghostTargets).omit({
@@ -332,7 +336,10 @@ export const auditLogs = pgTable("audit_logs", {
   entityId: varchar("entity_id"),
   details: text("details"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Performance index for audit trail view
+  index("audit_logs_merchant_created_idx").on(table.merchantId, table.createdAt),
+]);
 
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
   id: true,
