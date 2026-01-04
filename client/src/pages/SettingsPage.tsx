@@ -601,18 +601,23 @@ function MerchantProfileForm() {
 
 function SimulationEngine() {
   const { toast } = useToast();
-  const { refetch } = useMerchant();
+  const { merchant, refetch } = useMerchant();
 
-  const seedMutation = useMutation({
+  const chaosMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/dev/seed-scenarios");
+      if (!merchant?.id) {
+        throw new Error("Merchant not found. Complete onboarding first.");
+      }
+      const res = await apiRequest("POST", "/api/chaos/ignite", { merchantId: merchant.id });
       return res.json();
     },
-    onSuccess: (data: { created?: { ghosts?: number } }) => {
-      const count = data?.created?.ghosts || 0;
+    onSuccess: (data: { customersCreated?: number; invoicesCreated?: number; successfulPayments?: number; failedPayments?: number; message?: string }) => {
+      const customers = data?.customersCreated || 0;
+      const paid = data?.successfulPayments || 0;
+      const failed = data?.failedPayments || 0;
       toast({ 
-        title: "Simulation Complete", 
-        description: `Generated ${count} synthetic failures.` 
+        title: "Chaos Ignited", 
+        description: `${customers} customers created in Stripe Test Mode. ${paid} paid, ${failed} declined.`
       });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
@@ -621,7 +626,7 @@ function SimulationEngine() {
     },
     onError: (e: Error) => {
       toast({ 
-        title: "Simulation Failed", 
+        title: "Chaos Engine Failed", 
         description: e.message, 
         variant: "destructive" 
       });
@@ -638,24 +643,24 @@ function SimulationEngine() {
           <div className="flex-1">
             <h3 className="text-lg font-medium text-white mb-1">Chaos Engine</h3>
             <p className="text-slate-400 text-sm mb-3">
-              Inject 150+ synthetic payment failures for stress testing and demos.
+              Generate 50 real customers and invoices in Stripe Test Mode with weighted payment scenarios.
             </p>
             <Button 
               variant="outline" 
               className="border-amber-500/50 text-amber-400"
-              onClick={() => seedMutation.mutate()}
-              disabled={seedMutation.isPending}
-              data-testid="button-ignite-simulation"
+              onClick={() => chaosMutation.mutate()}
+              disabled={chaosMutation.isPending || !merchant?.id}
+              data-testid="button-ignite-chaos"
             >
-              {seedMutation.isPending ? (
+              {chaosMutation.isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
+                  Igniting Chaos...
                 </>
               ) : (
                 <>
                   <Zap className="w-4 h-4 mr-2" />
-                  Ignite Simulation
+                  Ignite Chaos
                 </>
               )}
             </Button>

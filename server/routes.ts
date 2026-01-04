@@ -6,7 +6,7 @@ import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
 import { handleWebhookEvent, queueWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
-import { runSeeder } from "./services/seeder";
+import { seedStripeData } from "./services/seeder";
 import { clerkAuth, syncClerkMerchant, requireClerkMerchant } from "./middleware/clerk";
 import { helmetConfig, globalLimiter, scanLimiter, requireCronSecret } from "./middleware/security";
 import { randomBytes } from "crypto";
@@ -1345,24 +1345,34 @@ export async function registerRoutes(
   });
 
   // ============================================================
-  // DEV-ONLY: Scenario Seeder (Requires authenticated merchant)
+  // CHAOS ENGINE v2: Stripe Load Generator
+  // Creates real customers/invoices in Stripe Test Mode
   // ============================================================
-  app.post("/api/dev/seed-scenarios", requireClerkMerchant, async (req: Request, res: Response) => {
+  app.post("/api/chaos/ignite", requireClerkMerchant, async (req: Request, res: Response) => {
     // Safety check: Only allow in development
     if (process.env.NODE_ENV === "production") {
       return res.status(403).json({ 
-        error: "This endpoint is not available in production" 
+        error: "Chaos Engine is not available in production" 
       });
     }
 
     try {
-      console.log("[DEV] Scenario seeder triggered via API");
-      const result = await runSeeder();
+      const { merchantId } = req.body;
+      
+      if (!merchantId) {
+        return res.status(400).json({
+          error: "Missing merchantId",
+          details: "merchantId is required in request body"
+        });
+      }
+      
+      console.log(`[CHAOS ENGINE v2] Ignite request for merchant ${merchantId}`);
+      const result = await seedStripeData(merchantId);
       return res.json(result);
     } catch (error: any) {
-      console.error("[DEV] Scenario seeder failed:", error.message);
+      console.error("[CHAOS ENGINE v2] Ignition failed:", error.message);
       return res.status(500).json({
-        error: "Seeder failed",
+        error: "Chaos Engine failed",
         details: error.message
       });
     }
