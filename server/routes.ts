@@ -85,14 +85,32 @@ export async function registerRoutes(
   // Apply security headers first (before any routes)
   app.use(helmetConfig);
   
+  // ============================================================
+  // PUBLIC ROUTES (No authentication required)
+  // These must be defined BEFORE the /api middleware stack
+  // ============================================================
+  
+  // Minimal health check for load balancers (outside /api/ path)
+  app.get("/health", (_req, res) => {
+    res.json({ 
+      status: "ok", 
+      service: "phantom"
+    });
+  });
+  
+  // ============================================================
+  // SECURE-BY-DEFAULT: Global Middleware Stack for /api/*
+  // Order is critical: Rate Limit -> Auth -> Merchant Sync
+  // ============================================================
+  
   // Apply global rate limiting to all API routes
   app.use("/api", globalLimiter);
   
   // Apply Clerk authentication middleware globally to /api/* routes
   app.use("/api", clerkAuth, syncClerkMerchant);
   
-  // Health check endpoint with vault status
-  app.get("/api/health", (_req, res) => {
+  // Authenticated health check endpoint with vault status (requires valid session)
+  app.get("/api/health", requireClerkMerchant, (_req, res) => {
     res.json({ 
       status: "ok", 
       service: "phantom", 
@@ -1247,9 +1265,9 @@ export async function registerRoutes(
   });
 
   // ============================================================
-  // DEV-ONLY: Test Merchant Onboarding
+  // DEV-ONLY: Test Merchant Onboarding (Requires authenticated merchant)
   // ============================================================
-  app.post("/api/dev/onboard-test-merchant", async (req: Request, res: Response) => {
+  app.post("/api/dev/onboard-test-merchant", requireClerkMerchant, async (req: Request, res: Response) => {
     // Safety check: Only allow in development
     if (process.env.NODE_ENV === "production") {
       return res.status(403).json({ 
@@ -1314,9 +1332,9 @@ export async function registerRoutes(
   });
 
   // ============================================================
-  // DEV-ONLY: Scenario Seeder
+  // DEV-ONLY: Scenario Seeder (Requires authenticated merchant)
   // ============================================================
-  app.post("/api/dev/seed-scenarios", async (req: Request, res: Response) => {
+  app.post("/api/dev/seed-scenarios", requireClerkMerchant, async (req: Request, res: Response) => {
     // Safety check: Only allow in development
     if (process.env.NODE_ENV === "production") {
       return res.status(403).json({ 
@@ -1335,6 +1353,17 @@ export async function registerRoutes(
         details: error.message
       });
     }
+  });
+
+  // ============================================================
+  // CATCH-ALL 404 GUARD: Prevent internal route leakage
+  // Must be the LAST /api route defined
+  // ============================================================
+  app.all("/api/*", (_req, res) => {
+    res.status(404).json({
+      error: "Not Found",
+      message: "The requested API endpoint does not exist"
+    });
   });
 
   // Start the Sentinel scheduler
