@@ -1,10 +1,109 @@
 // Pulse Engine - Orchestrates recovery and protection email timing using Oracle data
-import { storage, canSendEmail, incrementHourlyEmailCount, getHourlyEmailCount, RATE_LIMIT_PER_HOUR } from "../storage";
+import { storage } from "../storage";
 import { sendPulseEmail } from "./pulseMailer";
 import type { GhostTarget, Merchant } from "@shared/schema";
 import { mapFailureCodeToCategory } from "@shared/leakageCategories";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// =============================================================================
+// ATOMIC RATE LIMITING - Token Bucket Algorithm
+// =============================================================================
+// Prevents race conditions by using synchronous check-and-decrement operations.
+// Node.js single-threaded execution guarantees atomicity within consume().
+// =============================================================================
+
+const TOKENS_PER_HOUR = 100;
+const REFILL_INTERVAL_MS = 3600000; // 1 hour in milliseconds
+const TOKENS_PER_MS = TOKENS_PER_HOUR / REFILL_INTERVAL_MS;
+
+class TokenBucket {
+  private bucketSize: number;
+  private refillRate: number; // tokens per millisecond
+  private currentTokens: number;
+  private lastRefillTime: number;
+
+  constructor(bucketSize: number = TOKENS_PER_HOUR, refillRate: number = TOKENS_PER_MS) {
+    this.bucketSize = bucketSize;
+    this.refillRate = refillRate;
+    this.currentTokens = bucketSize; // Start full
+    this.lastRefillTime = Date.now();
+  }
+
+  /**
+   * ATOMIC consume operation - synchronous to prevent race conditions.
+   * Refills tokens based on elapsed time, then attempts to consume.
+   * @param tokens Number of tokens to consume (default: 1)
+   * @returns true if tokens consumed, false if insufficient tokens
+   */
+  consume(tokens: number = 1): boolean {
+    const now = Date.now();
+    const elapsed = now - this.lastRefillTime;
+    
+    // Refill tokens based on time elapsed
+    const tokensToAdd = elapsed * this.refillRate;
+    this.currentTokens = Math.min(this.bucketSize, this.currentTokens + tokensToAdd);
+    this.lastRefillTime = now;
+    
+    // Atomic check-and-decrement
+    if (tokens <= this.currentTokens) {
+      this.currentTokens -= tokens;
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Get current token count (for diagnostics only)
+   */
+  getTokenCount(): number {
+    return Math.floor(this.currentTokens);
+  }
+
+  /**
+   * Get bucket capacity
+   */
+  getBucketSize(): number {
+    return this.bucketSize;
+  }
+}
+
+// Per-merchant rate limit buckets (lazy initialization)
+const merchantBuckets = new Map<string, TokenBucket>();
+
+/**
+ * Get or create a TokenBucket for a specific merchant
+ */
+function getMerchantBucket(merchantId: string): TokenBucket {
+  let bucket = merchantBuckets.get(merchantId);
+  if (!bucket) {
+    bucket = new TokenBucket(TOKENS_PER_HOUR, TOKENS_PER_MS);
+    merchantBuckets.set(merchantId, bucket);
+    console.log(`[RATELIMIT] Initialized token bucket for merchant ${merchantId} (${TOKENS_PER_HOUR} tokens/hour)`);
+  }
+  return bucket;
+}
+
+/**
+ * Attempt to consume a rate limit token for a merchant.
+ * Returns true if allowed, false if rate limited.
+ */
+function consumeRateLimitToken(merchantId: string): boolean {
+  const bucket = getMerchantBucket(merchantId);
+  return bucket.consume(1);
+}
+
+/**
+ * Get current token count for diagnostics
+ */
+function getRateLimitStatus(merchantId: string): { current: number; max: number } {
+  const bucket = getMerchantBucket(merchantId);
+  return {
+    current: bucket.getTokenCount(),
+    max: bucket.getBucketSize()
+  };
+}
 
 interface GoldenHour {
   dayOfWeek: number;
@@ -214,11 +313,12 @@ export async function processQueue(): Promise<ProcessQueueResult> {
         continue;
       }
       
-      // Safety Valve: Rate limiting (50 emails/hour/merchant)
-      if (!(await canSendEmail(merchant.id))) {
+      // ATOMIC Rate Limiting: TokenBucket prevents race conditions
+      // consume() atomically checks AND decrements in one synchronous operation
+      if (!consumeRateLimitToken(merchant.id)) {
         result.rateLimited++;
-        const currentCount = await getHourlyEmailCount(merchant.id);
-        console.log(`[SENTINEL] Rate limit reached for merchant ${merchant.id} (${currentCount}/${RATE_LIMIT_PER_HOUR}/hour)`);
+        const status = getRateLimitStatus(merchant.id);
+        console.log(`[RATELIMIT] Hourly threshold reached. Postponing outreach. (${status.current}/${status.max} tokens remaining for merchant ${merchant.id})`);
         continue;
       }
       
@@ -240,7 +340,7 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       
       if (processResult.sent) {
         result.emailsSent++;
-        await incrementHourlyEmailCount(merchant.id);
+        // Token already consumed atomically by TokenBucket.consume() before send attempt
         
         // Log Sentinel action for audit trail
         await logSentinelAction(target, merchant, true, processResult.dryRun);
