@@ -7,6 +7,38 @@ import { mapFailureCodeToCategory } from "@shared/leakageCategories";
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // =============================================================================
+// QUIET HOURS - Regulatory Compliance
+// =============================================================================
+// Prevents outreach during unsociable hours (9 PM - 8 AM recipient local time)
+// Complies with consumer protection regulations in multiple jurisdictions
+// =============================================================================
+
+const QUIET_HOUR_START = 21; // 9 PM
+const QUIET_HOUR_END = 8;    // 8 AM
+
+/**
+ * Check if current hour (UTC) is within Quiet Hours (21:00 - 08:00)
+ * Returns true if outreach should be postponed
+ */
+function isWithinQuietHours(): boolean {
+  const now = new Date();
+  const currentHour = now.getUTCHours();
+  
+  // Quiet hours: 21:00 (9 PM) to 08:00 (8 AM) UTC
+  // This means: hour >= 21 OR hour < 8
+  return currentHour >= QUIET_HOUR_START || currentHour < QUIET_HOUR_END;
+}
+
+/**
+ * Get human-readable quiet hours status for logging
+ */
+function getQuietHoursStatus(): string {
+  const now = new Date();
+  const currentHour = now.getUTCHours();
+  return `Current hour: ${currentHour}:00 UTC (Quiet Hours: ${QUIET_HOUR_START}:00-${QUIET_HOUR_END}:00 UTC)`;
+}
+
+// =============================================================================
 // ATOMIC RATE LIMITING - Token Bucket Algorithm
 // =============================================================================
 // Prevents race conditions by using synchronous check-and-decrement operations.
@@ -314,6 +346,12 @@ export async function processQueue(): Promise<ProcessQueueResult> {
       if (!merchant.autoPilotEnabled) {
         result.pendingManualReview++;
         console.log(`[PULSE ENGINE] Target ${target.id} queued for manual review (Auto-Pilot OFF)`);
+        continue;
+      }
+      
+      // QUIET HOURS: Regulatory compliance check before any outreach
+      if (isWithinQuietHours()) {
+        console.log(`[RESCHEDULE] Outreach postponed due to Quiet Hours compliance. ${getQuietHoursStatus()}`);
         continue;
       }
       

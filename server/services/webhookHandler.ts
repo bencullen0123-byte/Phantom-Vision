@@ -1,9 +1,88 @@
 // Webhook Handler - Processes Stripe webhook events
+// Implements async queue pattern for <50ms webhook response times
 import Stripe from "stripe";
 import { storage } from "../storage";
 import { decrypt, redactEmail } from "../utils/crypto";
 import { determineRecoveryStrategy } from "./ghostHunter";
 import { sendGoldenHourEmail } from "./pulseMailer";
+
+// =============================================================================
+// ASYNC WEBHOOK QUEUE - Immediate 200 response, background processing
+// =============================================================================
+// Stripe expects webhook responses within 20 seconds. This pattern:
+// 1. Verifies signature
+// 2. Queues verified event
+// 3. Returns 200 immediately (<50ms)
+// 4. Processes queue in background
+// =============================================================================
+
+interface QueuedEvent {
+  event: Stripe.Event;
+  receivedAt: number;
+}
+
+const webhookQueue: QueuedEvent[] = [];
+let isProcessing = false;
+
+/**
+ * Add verified event to queue and trigger background processing
+ */
+export function queueWebhookEvent(event: Stripe.Event): void {
+  webhookQueue.push({
+    event,
+    receivedAt: Date.now(),
+  });
+  console.log(`[WEBHOOK] Event ${event.id} queued (queue size: ${webhookQueue.length})`);
+  
+  // Trigger background processing if not already running
+  if (!isProcessing) {
+    setImmediate(processWebhookQueue);
+  }
+}
+
+/**
+ * Background queue processor - processes events one-by-one
+ */
+async function processWebhookQueue(): Promise<void> {
+  if (isProcessing) return;
+  isProcessing = true;
+  
+  console.log(`[WEBHOOK] Starting queue processing (${webhookQueue.length} events)`);
+  
+  while (webhookQueue.length > 0) {
+    const item = webhookQueue.shift();
+    if (!item) continue;
+    
+    const processingDelay = Date.now() - item.receivedAt;
+    console.log(`[WEBHOOK] Processing event ${item.event.id} (queued ${processingDelay}ms ago)`);
+    
+    try {
+      await handleWebhookEvent(item.event);
+    } catch (error: any) {
+      console.error(`[WEBHOOK] Error processing event ${item.event.id}:`, error.message);
+      // Log error but continue processing queue
+      await storage.createSystemLog({
+        jobName: "webhook_error",
+        status: "error",
+        details: JSON.stringify({ eventId: item.event.id, eventType: item.event.type }),
+        errorMessage: error.message,
+      });
+    }
+  }
+  
+  isProcessing = false;
+  console.log(`[WEBHOOK] Queue processing complete`);
+}
+
+/**
+ * Get queue status for diagnostics
+ */
+export function getWebhookQueueStatus(): { queueSize: number; isProcessing: boolean } {
+  return {
+    queueSize: webhookQueue.length,
+    isProcessing,
+  };
+}
 
 interface WebhookResult {
   success: boolean;

@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { encrypt, decrypt, selfTest } from "./utils/crypto";
 import { runAuditForMerchant } from "./services/ghostHunter";
 import { processQueue } from "./services/pulseEngine";
-import { handleWebhookEvent } from "./services/webhookHandler";
+import { handleWebhookEvent, queueWebhookEvent } from "./services/webhookHandler";
 import { startScheduler, getSystemHealth, runGhostHunterJob, runPulseEngineJob } from "./services/scheduler";
 import { runSeeder } from "./services/seeder";
 import { clerkAuth, syncClerkMerchant, requireClerkMerchant } from "./middleware/clerk";
@@ -560,17 +560,12 @@ export async function registerRoutes(
       return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
     }
 
-    try {
-      const result = await handleWebhookEvent(event);
-      
-      return res.json({
-        received: true,
-        ...result
-      });
-    } catch (error: any) {
-      console.error("[WEBHOOK] Event processing failed:", error);
-      return res.status(500).json({ error: error.message });
-    }
+    // ASYNC WEBHOOK PATTERN: Queue event and return immediately (<50ms)
+    // Background processQueue() handles actual processing asynchronously
+    queueWebhookEvent(event);
+    
+    // Immediate 200 response - Stripe requires response within 20 seconds
+    return res.status(200).json({ received: true });
   });
 
   // Merchant Branding Update - PATCH endpoint for updating branding settings

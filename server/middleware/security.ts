@@ -3,8 +3,12 @@ import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 
+// Maximum age for cron timestamp (prevents replay attacks)
+const MAX_TIMESTAMP_AGE_MS = 60 * 1000; // 60 seconds
+
 export function requireCronSecret(req: Request, res: Response, next: NextFunction) {
   const headerSecret = req.headers["x-cron-secret"];
+  const headerTimestamp = req.headers["x-cron-timestamp"];
   const envSecret = process.env.CRON_SECRET;
 
   if (!envSecret) {
@@ -17,6 +21,32 @@ export function requireCronSecret(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  // REPLAY ATTACK PROTECTION: Validate timestamp freshness
+  if (typeof headerTimestamp !== "string") {
+    console.warn("[SECURITY] Missing x-cron-timestamp header");
+    return res.status(403).json({ error: "Timestamp required" });
+  }
+
+  const timestamp = parseInt(headerTimestamp, 10);
+  if (isNaN(timestamp)) {
+    console.warn("[SECURITY] Invalid x-cron-timestamp format");
+    return res.status(403).json({ error: "Invalid timestamp" });
+  }
+
+  const now = Date.now();
+  const age = now - timestamp;
+
+  if (age > MAX_TIMESTAMP_AGE_MS) {
+    console.warn(`[SECURITY] Stale cron timestamp rejected (age: ${age}ms, max: ${MAX_TIMESTAMP_AGE_MS}ms)`);
+    return res.status(403).json({ error: "Timestamp expired" });
+  }
+
+  if (age < -MAX_TIMESTAMP_AGE_MS) {
+    // Timestamp is in the future (clock skew attack)
+    console.warn(`[SECURITY] Future cron timestamp rejected (drift: ${-age}ms)`);
+    return res.status(403).json({ error: "Invalid timestamp" });
+  }
+
   // Constant-time comparison using SHA-256 to ensure equal buffer lengths
   // Prevents timing side-channel attacks
   const expected = crypto.createHash("sha256").update(envSecret).digest();
@@ -27,6 +57,7 @@ export function requireCronSecret(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  console.log(`[SECURITY] Cron request authenticated (timestamp age: ${age}ms)`);
   next();
 }
 
