@@ -31,6 +31,8 @@ Preferred communication style: Simple, everyday language.
     - `liquidity_oracle`: Anonymized metadata for recovery timing.
     - `system_logs`: Monitors scheduled jobs and system health.
 - **Multi-Currency:** Automatic detection and storage of `default_currency`, `impending_leakage_cents`, and `total_protected_cents`.
+- **Performance Indexes:** Composite indexes on `ghost_targets` (merchant_id, status) and (status, discovered_at) for fast dashboard queries; index on `audit_logs` (merchant_id, created_at) for audit trail.
+- **SQL Aggregation:** `getMerchantStats()` uses single SQL query with COUNT/SUM to eliminate 4 round-trips.
 
 ### Universal Revenue Intelligence (ML Metadata)
 - **Non-PII Fields:** `cardBrand`, `cardFunding`, `countryCode`, `requires3ds`, `stripeErrorCode`, `originalInvoiceDate` for ML analysis, all normalized to lowercase.
