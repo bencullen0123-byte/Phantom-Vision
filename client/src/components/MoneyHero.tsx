@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Loader2, RefreshCw, TrendingDown, TrendingUp, Zap, Shield, Info, Clock } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -205,15 +206,7 @@ export default function MoneyHero() {
 
   if (!merchant) return null;
 
-  const formatCurrency = (cents: number) => {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: stats?.defaultCurrency?.toUpperCase() || "GBP",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(cents / 100);
-  };
-
+  const currency = stats?.defaultCurrency;
   const lifetime = stats?.lifetime || { allTimeLeakedCents: 0, totalRecoveredCents: 0, totalGhostCount: 0 };
   const grossInvoiced = stats?.grossInvoicedCents || 0;
   const shadowLeakage = lifetime.allTimeLeakedCents;
@@ -247,7 +240,7 @@ export default function MoneyHero() {
               style={{ fontFamily: "JetBrains Mono, monospace" }}
               data-testid="text-volume-guarded"
             >
-              {statsLoading ? "..." : formatCurrency(grossInvoiced)}
+              {statsLoading ? "..." : formatCurrency(grossInvoiced, currency)}
             </p>
           </div>
         </div>
@@ -271,7 +264,7 @@ export default function MoneyHero() {
                 style={{ fontFamily: "JetBrains Mono, monospace" }}
                 data-testid="text-shadow-leakage"
               >
-                {statsLoading ? "..." : formatCurrency(shadowLeakage)}
+                {statsLoading ? "..." : formatCurrency(shadowLeakage, currency)}
               </p>
               <p className="text-xs text-slate-600 mt-1">
                 {leakageRate.toFixed(1)}% of guarded volume
@@ -281,7 +274,7 @@ export default function MoneyHero() {
                 <div className="mt-2 flex items-center gap-1.5">
                   <TrendingUp className="w-3 h-3 text-emerald-400" />
                   <span className="text-xs text-emerald-400 font-medium">
-                    {formatCurrency(projectedRecovery)} projected recovery
+                    {formatCurrency(projectedRecovery, currency)} projected recovery
                   </span>
                 </div>
               )}
@@ -300,7 +293,7 @@ export default function MoneyHero() {
               style={{ fontFamily: "JetBrains Mono, monospace" }}
               data-testid="text-recovered-hero"
             >
-              {statsLoading ? "..." : formatCurrency(lifetime.totalRecoveredCents)}
+              {statsLoading ? "..." : formatCurrency(lifetime.totalRecoveredCents, currency)}
             </p>
             <p className="text-xs text-slate-600 mt-1">
               {lifetime.totalGhostCount} ghosts detected
