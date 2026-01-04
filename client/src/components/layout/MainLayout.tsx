@@ -194,8 +194,8 @@ function GlobalHeader() {
     }
   }, [scanStatus, scanError, toast]);
 
-  // Only show metrics when user is authenticated AND has connected Stripe
-  const isConnected = isAuthenticated && merchant?.stripeConnected;
+  // Only show metrics when user is authenticated AND has merchant data (Stripe connected)
+  const isConnected = isAuthenticated && !!merchant;
   
   const isArmed = merchant?.autoPilotEnabled || false;
   const volumeGuarded = stats?.grossInvoicedCents || 0;
