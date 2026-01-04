@@ -424,26 +424,31 @@ async function scanForImpendingRisks(
           customerName = (customer as Stripe.Customer).name || email || 'Unknown Customer';
         }
         
-        // Calculate MRR from subscription items
-        let mrr = 0;
+        // Calculate MRR from subscription items using Decimal.js for penny-perfect accuracy
+        let mrrDecimal = new Decimal(0);
         for (const item of subscription.items.data) {
           const price = item.price;
           if (price.recurring) {
-            const amount = price.unit_amount || 0;
-            const quantity = item.quantity || 1;
+            const amount = new Decimal(price.unit_amount || 0);
+            const quantity = new Decimal(item.quantity || 1);
+            const itemTotal = amount.times(quantity);
             
-            // Normalize to monthly amount
+            // Normalize to monthly amount (cents) using Decimal arithmetic
             if (price.recurring.interval === 'month') {
-              mrr += amount * quantity;
+              mrrDecimal = mrrDecimal.plus(itemTotal);
             } else if (price.recurring.interval === 'year') {
-              mrr += Math.round((amount * quantity) / 12);
+              // Yearly → monthly: divide by 12, floor to nearest cent
+              mrrDecimal = mrrDecimal.plus(itemTotal.dividedBy(12).floor());
             } else if (price.recurring.interval === 'week') {
-              mrr += Math.round((amount * quantity) * 4.33);
+              // Weekly → monthly: multiply by 4.33 (52/12), floor to nearest cent
+              mrrDecimal = mrrDecimal.plus(itemTotal.times(4.33).floor());
             } else if (price.recurring.interval === 'day') {
-              mrr += Math.round((amount * quantity) * 30);
+              // Daily → monthly: multiply by 30, floor to nearest cent
+              mrrDecimal = mrrDecimal.plus(itemTotal.times(30).floor());
             }
           }
         }
+        const mrr = mrrDecimal.toNumber();
         
         // Capture currency from subscription
         if (!detectedCurrency && subscription.currency) {
