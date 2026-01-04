@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, bigint, boolean, serial, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -79,6 +79,11 @@ export const merchants = pgTable("merchants", {
   dekIv: text("dek_iv"),
   dekTag: text("dek_tag"),
   keyVersion: integer("key_version").default(1).notNull(),
+  // Golden Hour Oracle: Lifetime revenue baseline
+  lifetimeGrossVolumeCents: bigint("lifetime_gross_volume_cents", { mode: "number" }).default(0).notNull(),
+  // Liquidity Map: Timezone-normalized transaction frequency by day_hour slot
+  // Structure: { "Monday_09": 15, "Friday_14": 42, ... }
+  liquidityMap: jsonb("liquidity_map").$type<Record<string, number>>().default({}),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
