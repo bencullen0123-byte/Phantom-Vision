@@ -72,6 +72,13 @@ export const merchants = pgTable("merchants", {
   stripeSubscriptionId: text("stripe_subscription_id"),
   subscriptionStatus: text("subscription_status").default("free").notNull(),
   planTier: text("plan_tier").default("starter").notNull(),
+  // GDPR Crypto-Shredding (Article 17 Right to Erasure)
+  // DEK: Data Encryption Key - unique per merchant, encrypted with Master Key (KEK)
+  // Setting dek=NULL permanently destroys ability to decrypt merchant's PII vault data
+  dek: text("dek"),
+  dekIv: text("dek_iv"),
+  dekTag: text("dek_tag"),
+  keyVersion: integer("key_version").default(1).notNull(),
 });
 
 export const insertMerchantSchema = createInsertSchema(merchants).omit({
