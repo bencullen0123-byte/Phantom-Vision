@@ -41,6 +41,10 @@ export interface MerchantStats {
     totalVetted: number; // Cumulative invoices ever vetted by Ghost Hunter
   };
   recoveryRate?: number;
+  // Golden Hour Oracle fields
+  lifetimeGrossVolumeCents?: number;
+  leakageRatio?: number;
+  recommendedGoldenHour?: string | null;
 }
 
 export function useMerchantStats() {

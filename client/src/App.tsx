@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { MerchantProvider, useMerchant } from "@/context/MerchantContext";
 import MainLayout from "@/components/layout/MainLayout";
 import ObsidianSkeleton from "@/components/ObsidianSkeleton";
+import AuditPage from "@/pages/AuditPage";
 import DashboardPage from "@/pages/DashboardPage";
 import RecoveriesPage from "@/pages/RecoveriesPage";
 import SettingsPage from "@/pages/SettingsPage";
@@ -17,6 +18,7 @@ function ProtectedRouter() {
     <MainLayout>
       <Switch>
         <Route path="/" component={DashboardPage} />
+        <Route path="/audit" component={AuditPage} />
         <Route path="/recoveries" component={RecoveriesPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route component={NotFound} />

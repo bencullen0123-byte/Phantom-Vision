@@ -1,7 +1,7 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { UserButton } from "@clerk/clerk-react";
-import { LayoutDashboard, Settings, DollarSign, Clock, Shield, RefreshCw, Loader2 } from "lucide-react";
+import { LayoutDashboard, Settings, DollarSign, Clock, Shield, RefreshCw, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -37,6 +37,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { label: "Audit Report", path: "/audit", icon: FileText, description: "Strategic Overview" },
   { label: "Dashboard", path: "/", icon: LayoutDashboard, description: "The Audit" },
   { label: "Recoveries", path: "/recoveries", icon: DollarSign, description: "The Action" },
   { label: "Settings", path: "/settings", icon: Settings, description: "The Control Plane" },

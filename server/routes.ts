@@ -670,6 +670,24 @@ export async function registerRoutes(
         supportEmail: merchant.supportEmail,
         brandColor: merchant.brandColor,
         autoPilotEnabled: merchant.autoPilotEnabled,
+        // Golden Hour Oracle fields
+        lifetimeGrossVolumeCents: Number(merchant.lifetimeGrossVolumeCents || 0),
+        leakageRatio: historicalStats.lifetime.allTimeLeakedCents > 0 && Number(merchant.lifetimeGrossVolumeCents || 0) > 0
+          ? Math.round((historicalStats.lifetime.allTimeLeakedCents / Number(merchant.lifetimeGrossVolumeCents)) * 10000) / 100
+          : 0,
+        recommendedGoldenHour: (() => {
+          const liquidityMap = merchant.liquidityMap as Record<string, number> | null;
+          if (!liquidityMap || Object.keys(liquidityMap).length === 0) return null;
+          let maxSlot: string | null = null;
+          let maxCount = 0;
+          for (const [slot, count] of Object.entries(liquidityMap)) {
+            if (count > maxCount) {
+              maxCount = count;
+              maxSlot = slot;
+            }
+          }
+          return maxSlot;
+        })(),
         leakageDistribution: {
           categories: categoryData,
           totalValue,
