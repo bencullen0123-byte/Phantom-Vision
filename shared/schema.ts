@@ -113,9 +113,14 @@ export type InsertPiiVault = z.infer<typeof insertPiiVaultSchema>;
 export type PiiVault = typeof piiVault.$inferSelect;
 
 // Ghost targets table - stores transient PII for recovery
-// Status values: 'pending', 'recovered', 'exhausted', 'impending'
-// - 'pending': ghost user with failed payment requiring recovery
+// Status values: 'active', 'pending', 'recovered', 'exhausted', 'impending', 'terminal', 'ghost'
+// - 'active': newly discovered ghost, eligible for recovery
+// - 'pending': ghost user with failed payment requiring recovery (legacy alias for 'active')
+// - 'ghost': in active recovery funnel (being processed)
+// - 'recovered': payment received, recovery complete
+// - 'exhausted': max email attempts reached without recovery
 // - 'impending': proactive detection - active subscription with expiring card
+// - 'terminal': VAMP compliance kill-switch - permanent hard decline (stolen_card, fraud, etc.)
 // PII (email, customerName) is encrypted with AES-256-GCM before storage
 export const ghostTargets = pgTable("ghost_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -166,6 +171,9 @@ export const ghostTargets = pgTable("ghost_targets", {
   // Attribution Link Tracking (Sprint 2.5.1): click analytics for recovery links
   clickCount: integer("click_count").default(0).notNull(),
   lastClickedAt: timestamp("last_clicked_at"),
+  // VAMP Compliance Kill-Switch (Phase 3.2): reason for terminal status
+  // Set when status='terminal' to document why engagement was permanently stopped
+  terminationReason: text("termination_reason"),
 });
 
 // Internal schema for database operations (uses encrypted fields)
@@ -207,6 +215,8 @@ export interface InsertGhostTarget {
   recoveryStrategy?: string | null;
   // Attribution Link Tracking (Sprint 2.5.1)
   clickCount?: number;
+  // VAMP Compliance Kill-Switch (Phase 3.2)
+  terminationReason?: string | null;
   lastClickedAt?: Date | null;
 }
 
