@@ -86,6 +86,10 @@ export interface MerchantStats {
   recoveredCount: number;
   totalRecoveredCents: number;
   recoveryRate: number;
+  // Golden Hour Oracle fields
+  lifetimeGrossVolumeCents: number;
+  leakageRatio: number; // (allTimeLeakedCents / lifetimeGrossVolumeCents) * 100
+  recommendedGoldenHour: string | null; // Format: "Monday_14" (day_hour with highest liquidity)
 }
 
 export interface MonthlyTrendPoint {
@@ -541,12 +545,39 @@ export class DatabaseStorage implements IStorage {
       ? new Decimal(recoveredCount).dividedBy(totalGhosts).times(100).toNumber()
       : 0;
     
+    // GOLDEN HOUR ORACLE: Fetch merchant liquidity data
+    const merchant = await this.getMerchant(merchantId);
+    const lifetimeGrossVolumeCents = Number(merchant?.lifetimeGrossVolumeCents || 0);
+    const allTimeLeakedCents = Number(merchant?.allTimeLeakedCents || 0);
+    
+    // Calculate leakage ratio (percentage of gross volume that was lost)
+    const leakageRatio = lifetimeGrossVolumeCents > 0
+      ? new Decimal(allTimeLeakedCents).dividedBy(lifetimeGrossVolumeCents).times(100).toNumber()
+      : 0;
+    
+    // Find recommended Golden Hour from liquidity map
+    let recommendedGoldenHour: string | null = null;
+    const liquidityMap = merchant?.liquidityMap as Record<string, number> | null;
+    if (liquidityMap && Object.keys(liquidityMap).length > 0) {
+      let maxCount = 0;
+      for (const [slot, count] of Object.entries(liquidityMap)) {
+        if (count > maxCount) {
+          maxCount = count;
+          recommendedGoldenHour = slot;
+        }
+      }
+    }
+    
     return {
       totalGhostsFound: totalGhosts,
       activeGhosts,
       recoveredCount,
       totalRecoveredCents,
       recoveryRate: Math.round(recoveryRate * 100) / 100,
+      // Golden Hour Oracle fields
+      lifetimeGrossVolumeCents,
+      leakageRatio: Math.round(leakageRatio * 100) / 100,
+      recommendedGoldenHour,
     };
   }
 
