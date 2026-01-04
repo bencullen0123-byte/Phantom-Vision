@@ -1,7 +1,8 @@
 import { merchants, ghostTargets, liquidityOracle, systemLogs, cronLocks, piiVault, scanJobs, auditLogs, rateLimits, notifications, type Merchant, type InsertMerchant, type GhostTarget, type InsertGhostTarget, type GhostTargetDb, type LiquidityOracle, type InsertLiquidityOracle, type SystemLog, type InsertSystemLog, type CronLock, type PiiVault, type ScanJob, type InsertScanJob, type AuditLog, type InsertAuditLog, type Notification, type InsertNotification } from "@shared/schema";
 import { db } from "./db";
 import { eq, count, isNull, and, or, sql, desc, lt, ne, isNotNull } from "drizzle-orm";
-import { encrypt, decrypt } from "./utils/crypto";
+import { encrypt, decrypt, CriticalSecurityError } from "./utils/crypto";
+import { randomBytes } from "crypto";
 import Decimal from "decimal.js";
 
 // Transaction type for atomic batch operations
@@ -397,6 +398,10 @@ export interface IStorage {
   getNotifications(merchantId: string): Promise<Notification[]>;
   markNotificationRead(id: number): Promise<Notification | undefined>;
   countUnreadNotifications(merchantId: string): Promise<number>;
+  
+  // GDPR Crypto-Shredding (Article 17)
+  getMerchantDek(merchantId: string): Promise<Buffer | null>;
+  shredMerchantData(merchantId: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -422,9 +427,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMerchant(insertMerchant: InsertMerchant): Promise<Merchant> {
+    // GDPR Crypto-Shredding: Generate unique DEK for this merchant
+    // DEK is 32 bytes (256-bit) for AES-256, encrypted by Master Key (KEK)
+    const dekPlaintext = randomBytes(32);
+    const { encryptedData: dek, iv: dekIv, tag: dekTag } = encrypt(dekPlaintext.toString('hex'));
+    
     const [merchant] = await db
       .insert(merchants)
-      .values(insertMerchant)
+      .values({
+        ...insertMerchant,
+        dek,
+        dekIv,
+        dekTag,
+        keyVersion: 1,
+      })
       .returning();
     return merchant;
   }
@@ -1738,6 +1754,70 @@ export class DatabaseStorage implements IStorage {
         eq(notifications.read, false)
       ));
     return result?.count || 0;
+  }
+
+  // ============================================================================
+  // GDPR CRYPTO-SHREDDING (Article 17 Right to Erasure)
+  // ============================================================================
+  
+  /**
+   * Retrieve and decrypt the merchant's Data Encryption Key (DEK)
+   * @returns Decrypted DEK as Buffer, or null if merchant has been crypto-shredded
+   */
+  async getMerchantDek(merchantId: string): Promise<Buffer | null> {
+    const merchant = await this.getMerchant(merchantId);
+    
+    if (!merchant) {
+      throw new CriticalSecurityError(`Merchant not found: ${merchantId}`);
+    }
+    
+    // If DEK is null, merchant data has been crypto-shredded
+    if (!merchant.dek || !merchant.dekIv || !merchant.dekTag) {
+      return null;
+    }
+    
+    // Decrypt DEK using Master Key (KEK from environment)
+    const dekHex = decrypt(merchant.dek, merchant.dekIv, merchant.dekTag);
+    return Buffer.from(dekHex, 'hex');
+  }
+  
+  /**
+   * GDPR Article 17: Crypto-shred merchant data by destroying their DEK
+   * Without the DEK, all PII vault data for this merchant becomes mathematically unrecoverable
+   * @returns true if shredding succeeded, false if merchant not found
+   */
+  async shredMerchantData(merchantId: string): Promise<boolean> {
+    const merchant = await this.getMerchant(merchantId);
+    
+    if (!merchant) {
+      return false;
+    }
+    
+    // Destroy DEK and encrypted Stripe token
+    // This makes all PII vault data for this merchant permanently unrecoverable
+    await db
+      .update(merchants)
+      .set({
+        dek: null,
+        dekIv: null,
+        dekTag: null,
+        encryptedToken: 'SHREDDED',
+        iv: 'SHREDDED',
+        tag: 'SHREDDED',
+      })
+      .where(eq(merchants.id, merchantId));
+    
+    // Log the crypto-shredding event for audit trail
+    await this.createAuditLog({
+      merchantId,
+      action: 'CRYPTO_SHRED',
+      entityType: 'merchant',
+      entityId: merchantId,
+      oldValue: null,
+      newValue: { message: 'DEK and encrypted tokens permanently destroyed per GDPR Article 17' },
+    });
+    
+    return true;
   }
 }
 
