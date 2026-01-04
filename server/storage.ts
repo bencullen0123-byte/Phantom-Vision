@@ -327,6 +327,7 @@ export interface IStorage {
   getMerchant(id: string): Promise<Merchant | undefined>;
   getMerchantByStripeUserId(stripeUserId: string): Promise<Merchant | undefined>;
   getMerchantByClerkId(clerkId: string): Promise<Merchant | undefined>;
+  getMerchantByOrgId(orgId: string): Promise<Merchant | undefined>;
   createMerchant(merchant: InsertMerchant): Promise<Merchant>;
   getAllMerchants(): Promise<Merchant[]>;
   updateMerchant(id: string, updates: Partial<InsertMerchant>): Promise<Merchant | undefined>;
@@ -412,6 +413,11 @@ export class DatabaseStorage implements IStorage {
 
   async getMerchantByClerkId(clerkId: string): Promise<Merchant | undefined> {
     const [merchant] = await db.select().from(merchants).where(eq(merchants.clerkId, clerkId));
+    return merchant || undefined;
+  }
+
+  async getMerchantByOrgId(orgId: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.clerkOrgId, orgId));
     return merchant || undefined;
   }
 
