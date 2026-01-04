@@ -1,27 +1,10 @@
 import { useMerchantStats } from "@/hooks/use-merchant-stats";
 import { useMerchant } from "@/context/MerchantContext";
+import { formatCurrency } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
-import { Loader2, TrendingUp, AlertTriangle, Sparkles, Clock } from "lucide-react";
-
-function formatCurrency(cents: number, currency: string = "usd"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(cents / 100);
-}
-
-function formatGoldenHour(slot: string | null | undefined): string {
-  if (!slot) return "Analyzing...";
-  const parts = slot.split("_");
-  if (parts.length !== 2) return slot;
-  const [day, hour] = parts;
-  const hourNum = parseInt(hour, 10);
-  const period = hourNum >= 12 ? "PM" : "AM";
-  const hour12 = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
-  return `${day}s at ${hour12}${period}`;
-}
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
+import { Loader2, TrendingUp, AlertTriangle, Shield } from "lucide-react";
 
 function AuditPage() {
   const { merchant, isAuthenticated } = useMerchant();
@@ -55,22 +38,21 @@ function AuditPage() {
     );
   }
 
+  const currency = stats.defaultCurrency;
   const lifetimeGrossVolume = stats.lifetimeGrossVolumeCents || 0;
-  const leakageRatio = stats.leakageRatio || 0;
   const allTimeLeaked = stats.lifetime?.allTimeLeakedCents || 0;
+  const leakageRatio = lifetimeGrossVolume > 0 ? (allTimeLeaked / lifetimeGrossVolume) * 100 : 0;
   const projectedRecovery = Math.round(allTimeLeaked * 0.4);
-  const goldenHour = stats.recommendedGoldenHour;
-  const currency = stats.defaultCurrency || "usd";
 
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="min-h-screen p-8">
       <div className="max-w-5xl mx-auto">
         <header className="text-center mb-12">
           <h1 className="text-3xl font-semibold text-foreground mb-2">
             Revenue Integrity Report
           </h1>
           <p className="text-slate-400">
-            A strategic audit of your payment health
+            {merchant?.businessName ? `Financial audit for ${merchant.businessName}` : "A strategic audit of your payment health"}
           </p>
         </header>
 
@@ -86,7 +68,11 @@ function AuditPage() {
               </div>
             </div>
             <div className="text-center py-4">
-              <p className="text-5xl font-mono font-bold text-white tracking-tight" data-testid="text-lifetime-volume">
+              <p 
+                className="text-5xl font-bold text-white tracking-tight" 
+                style={{ fontFamily: "JetBrains Mono, monospace" }}
+                data-testid="text-lifetime-volume"
+              >
                 {formatCurrency(lifetimeGrossVolume, currency)}
               </p>
               <p className="text-slate-400 mt-2 text-sm">Lifetime Processed Volume</p>
@@ -99,19 +85,27 @@ function AuditPage() {
                 <AlertTriangle className="w-6 h-6 text-amber-400" />
               </div>
               <div>
-                <h2 className="text-lg font-medium text-slate-300 mb-1">Act 2: Leakage</h2>
+                <h2 className="text-lg font-medium text-slate-300 mb-1">Act 2: The Loss</h2>
                 <p className="text-sm text-slate-500">Revenue lost to failed payments and ghost users</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-8 py-4">
               <div className="text-center">
-                <p className="text-5xl font-mono font-bold text-amber-400 tracking-tight" data-testid="text-leakage-ratio">
+                <p 
+                  className="text-5xl font-bold text-amber-400 tracking-tight" 
+                  style={{ fontFamily: "JetBrains Mono, monospace" }}
+                  data-testid="text-leakage-ratio"
+                >
                   {leakageRatio.toFixed(2)}%
                 </p>
                 <p className="text-slate-400 mt-2 text-sm">Leakage Ratio</p>
               </div>
               <div className="text-center">
-                <p className="text-5xl font-mono font-bold text-red-400 tracking-tight" data-testid="text-total-leaked">
+                <p 
+                  className="text-5xl font-bold text-red-400 tracking-tight" 
+                  style={{ fontFamily: "JetBrains Mono, monospace" }}
+                  data-testid="text-total-leaked"
+                >
                   {formatCurrency(allTimeLeaked, currency)}
                 </p>
                 <p className="text-slate-400 mt-2 text-sm">Total Leaked</p>
@@ -119,38 +113,42 @@ function AuditPage() {
             </div>
           </Card>
 
-          <Card className="p-8 bg-slate-900/50 border-white/10" data-testid="card-act-3-opportunity">
+          <Card className="p-8 bg-emerald-950/30 border-emerald-500/20" data-testid="card-act-3-prize">
             <div className="flex items-start gap-4 mb-6">
               <div className="w-12 h-12 rounded-full bg-emerald-600/20 flex items-center justify-center shrink-0">
-                <Sparkles className="w-6 h-6 text-emerald-400" />
+                <Shield className="w-6 h-6 text-emerald-400" />
               </div>
               <div>
-                <h2 className="text-lg font-medium text-slate-300 mb-1">Act 3: Opportunity</h2>
-                <p className="text-sm text-slate-500">Recoverable revenue and optimal engagement timing</p>
+                <h2 className="text-lg font-medium text-emerald-300 mb-1">Act 3: The Prize</h2>
+                <p className="text-sm text-slate-500">Recoverable revenue awaiting action</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-8 py-4">
-              <div className="text-center">
-                <p className="text-5xl font-mono font-bold text-emerald-400 tracking-tight" data-testid="text-projected-recovery">
-                  {formatCurrency(projectedRecovery, currency)}
-                </p>
-                <p className="text-slate-400 mt-2 text-sm">Projected Recovery (40%)</p>
-              </div>
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-2 mb-1">
-                  <Clock className="w-5 h-5 text-indigo-400" />
-                </div>
-                <p className="text-3xl font-mono font-bold text-indigo-300 tracking-tight" data-testid="text-golden-hour">
-                  {formatGoldenHour(goldenHour)}
-                </p>
-                <p className="text-slate-400 mt-2 text-sm">Golden Hour</p>
-              </div>
+            <div className="text-center py-6">
+              <p 
+                className="text-6xl font-bold text-emerald-400 tracking-tight" 
+                style={{ 
+                  fontFamily: "JetBrains Mono, monospace",
+                  textShadow: "0 0 20px rgba(16, 185, 129, 0.3)"
+                }}
+                data-testid="text-projected-recovery"
+              >
+                {formatCurrency(projectedRecovery, currency)}
+              </p>
+              <p className="text-slate-400 mt-3 text-sm">Projected Recovery</p>
+              <p className="text-emerald-500/70 text-xs mt-1">Based on 40% industry recovery benchmark</p>
             </div>
           </Card>
         </div>
 
-        <footer className="text-center mt-12 text-slate-500 text-sm">
-          Last audit: {stats.lastAuditAt ? new Date(stats.lastAuditAt).toLocaleDateString() : "Never"}
+        <footer className="text-center mt-12 space-y-4">
+          <p className="text-slate-500 text-sm">
+            Last audit: {stats.lastAuditAt ? new Date(stats.lastAuditAt).toLocaleDateString() : "Pending"}
+          </p>
+          <Link href="/">
+            <Button variant="outline" className="border-white/10 text-slate-300" data-testid="button-return-dashboard">
+              Return to Dashboard
+            </Button>
+          </Link>
         </footer>
       </div>
     </div>
