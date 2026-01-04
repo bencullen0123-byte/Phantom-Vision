@@ -173,17 +173,8 @@ function AppSidebar() {
   );
 }
 
-function formatEuro(cents: number): string {
-  return new Intl.NumberFormat("en-IE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(cents / 100);
-}
-
 function GlobalHeader() {
-  const { merchant } = useMerchant();
+  const { merchant, isAuthenticated } = useMerchant();
   const { stats } = useMerchantStats();
   const { toast } = useToast();
   const { startScan, status: scanStatus, progress, isScanning, error: scanError } = useScanJob();
@@ -203,94 +194,106 @@ function GlobalHeader() {
     }
   }, [scanStatus, scanError, toast]);
 
+  // Only show metrics when user is authenticated AND has connected Stripe
+  const isConnected = isAuthenticated && merchant?.stripeConnected;
+  
   const isArmed = merchant?.autoPilotEnabled || false;
   const volumeGuarded = stats?.grossInvoicedCents || 0;
   const activeLeakage = stats?.lifetime?.allTimeLeakedCents || 0;
   const revenueSaved = (stats?.lifetime?.totalRecoveredCents || 0) + (stats?.totalProtectedCents || 0);
   const lastAudit = stats?.lastAuditAt || null;
+  const currency = stats?.defaultCurrency || "eur";
 
   return (
     <header className="h-12 border-b border-white/10 bg-obsidian/95 backdrop-blur-sm sticky top-0 z-40 flex items-center justify-between px-4 gap-6">
       <div className="flex items-center gap-4">
         <SidebarTrigger className="text-slate-400 hover:text-white" data-testid="button-sidebar-toggle" />
-        <div className="h-5 w-px bg-white/10" />
-        <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-indigo-400" />
-          <span 
-            className="text-sm font-bold text-white tabular-nums"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-volume-guarded"
-          >
-            {formatEuro(volumeGuarded)}
-          </span>
-          <span className="text-xs text-slate-500 hidden sm:inline">Guarded</span>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isArmed ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
-          <span className={`text-xs font-medium ${isArmed ? "text-emerald-400" : "text-slate-500"}`} data-testid="text-sentinel-status">
-            {isArmed ? "Sentinel Active" : "Standby"}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-1.5">
-          <span 
-            className="text-sm font-bold text-red-400/80 tabular-nums"
-            style={{ fontFamily: "JetBrains Mono, monospace" }}
-            data-testid="text-active-leakage"
-          >
-            {formatEuro(activeLeakage)}
-          </span>
-          <span className="text-xs text-slate-500 hidden sm:inline">Leakage</span>
-        </div>
-        
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-slate-400 hover:text-white min-w-[4rem]"
-          onClick={() => startScan()}
-          disabled={isScanning}
-          data-testid="button-refresh-audit"
-        >
-          {isScanning ? (
-            <span className="flex items-center gap-1.5">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span className="text-xs tabular-nums" style={{ fontFamily: "JetBrains Mono, monospace" }}>
-                {progress}%
+        {isConnected && (
+          <>
+            <div className="h-5 w-px bg-white/10" />
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-indigo-400" />
+              <span 
+                className="text-sm font-bold text-white tabular-nums"
+                style={{ fontFamily: "JetBrains Mono, monospace" }}
+                data-testid="text-volume-guarded"
+              >
+                {formatCurrency(volumeGuarded, currency)}
               </span>
-            </span>
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
-          )}
-        </Button>
+              <span className="text-xs text-slate-500 hidden sm:inline">Guarded</span>
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-1.5">
-          <span 
-            className="text-sm font-bold text-emerald-400 tabular-nums"
-            style={{ 
-              fontFamily: "JetBrains Mono, monospace",
-              textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
-            }}
-            data-testid="text-revenue-saved"
+      {isConnected && (
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isArmed ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+            <span className={`text-xs font-medium ${isArmed ? "text-emerald-400" : "text-slate-500"}`} data-testid="text-sentinel-status">
+              {isArmed ? "Sentinel Active" : "Standby"}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-1.5">
+            <span 
+              className="text-sm font-bold text-red-400/80 tabular-nums"
+              style={{ fontFamily: "JetBrains Mono, monospace" }}
+              data-testid="text-active-leakage"
+            >
+              {formatCurrency(activeLeakage, currency)}
+            </span>
+            <span className="text-xs text-slate-500 hidden sm:inline">Leakage</span>
+          </div>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-slate-400 hover:text-white min-w-[4rem]"
+            onClick={() => startScan()}
+            disabled={isScanning}
+            data-testid="button-refresh-audit"
           >
-            {formatEuro(revenueSaved)}
-          </span>
-          <span className="text-xs text-emerald-500/70 hidden sm:inline">Saved</span>
+            {isScanning ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="text-xs tabular-nums" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                  {progress}%
+                </span>
+              </span>
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+          </Button>
         </div>
-        
-        <div className="flex items-center gap-1 text-slate-500">
-          <Clock className="w-3 h-3" />
-          <span className="text-xs tabular-nums" data-testid="text-last-audit">
-            {formatRelativeTime(lastAudit)}
-          </span>
+      )}
+
+      {isConnected && (
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-1.5">
+            <span 
+              className="text-sm font-bold text-emerald-400 tabular-nums"
+              style={{ 
+                fontFamily: "JetBrains Mono, monospace",
+                textShadow: "0 0 8px rgba(16, 185, 129, 0.3)"
+              }}
+              data-testid="text-revenue-saved"
+            >
+              {formatCurrency(revenueSaved, currency)}
+            </span>
+            <span className="text-xs text-emerald-500/70 hidden sm:inline">Saved</span>
+          </div>
+          
+          <div className="flex items-center gap-1 text-slate-500">
+            <Clock className="w-3 h-3" />
+            <span className="text-xs tabular-nums" data-testid="text-last-audit">
+              {formatRelativeTime(lastAudit)}
+            </span>
+          </div>
+          
+          <NotificationsBell />
         </div>
-        
-        <NotificationsBell />
-      </div>
+      )}
     </header>
   );
 }
