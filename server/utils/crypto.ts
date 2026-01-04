@@ -1,8 +1,22 @@
 import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
 
-// NIST recommended IV length for AES-GCM is 12 bytes (96 bits)
-const IV_LENGTH = 12;
+// NIST SP 800-38D: 96-bit IV is required for AES-GCM to prevent GHASH collisions.
+// DO NOT CHANGE: Using any other IV length breaks NIST compliance.
+const IV_BYTES = 12;
+const IV_HEX_LENGTH = 24; // 12 bytes = 24 hex characters
+const KEY_BYTES = 32; // AES-256 requires exactly 32 bytes
 const ALGORITHM = "aes-256-gcm";
+
+/**
+ * CriticalSecurityError: Thrown when cryptographic invariants are violated.
+ * These errors indicate configuration or implementation bugs that must be fixed.
+ */
+export class CriticalSecurityError extends Error {
+  constructor(message: string) {
+    super(`[CRITICAL_SECURITY] ${message}`);
+    this.name = "CriticalSecurityError";
+  }
+}
 
 interface EncryptionResult {
   encryptedData: string;
@@ -14,22 +28,34 @@ function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   
   if (!key) {
-    console.error("[SECURITY] ENCRYPTION_KEY environment variable is not set");
-    process.exit(1);
+    throw new CriticalSecurityError("ENCRYPTION_KEY environment variable is not set");
   }
   
-  if (key.length < 32) {
-    console.error("[SECURITY] ENCRYPTION_KEY must be at least 32 characters long");
-    process.exit(1);
+  if (key.length < KEY_BYTES) {
+    throw new CriticalSecurityError(`ENCRYPTION_KEY must be at least ${KEY_BYTES} characters long`);
   }
   
   // Use first 32 bytes of the key for AES-256
-  return Buffer.from(key.slice(0, 32), "utf-8");
+  return Buffer.from(key.slice(0, KEY_BYTES), "utf-8");
 }
 
-export function encrypt(plaintext: string): EncryptionResult {
-  const key = getEncryptionKey();
-  const iv = randomBytes(IV_LENGTH);
+/**
+ * Encrypt plaintext using AES-256-GCM with NIST-compliant 96-bit IV.
+ * @param plaintext - The string to encrypt
+ * @param customKey - Optional key buffer for key rotation support (defaults to env ENCRYPTION_KEY)
+ * @returns EncryptionResult with hex-encoded ciphertext, IV, and auth tag
+ * @throws CriticalSecurityError if key length is invalid
+ */
+export function encrypt(plaintext: string, customKey?: Buffer): EncryptionResult {
+  const key = customKey ?? getEncryptionKey();
+  
+  // Runtime key length validation - prevents silent failures from misconfiguration
+  if (key.length !== KEY_BYTES) {
+    throw new CriticalSecurityError(`Encryption key must be exactly ${KEY_BYTES} bytes, got ${key.length}`);
+  }
+  
+  // NIST SP 800-38D: Generate exactly 12 random bytes for IV
+  const iv = randomBytes(IV_BYTES);
   
   const cipher = createCipheriv(ALGORITHM, key, iv);
   
@@ -45,8 +71,22 @@ export function encrypt(plaintext: string): EncryptionResult {
   };
 }
 
-export function decrypt(encryptedData: string, ivHex: string, tagHex: string): string {
-  const key = getEncryptionKey();
+/**
+ * Decrypt ciphertext using AES-256-GCM.
+ * @param encryptedData - Hex-encoded ciphertext
+ * @param ivHex - Hex-encoded IV (must be exactly 24 hex chars / 12 bytes for NIST compliance)
+ * @param tagHex - Hex-encoded authentication tag
+ * @param customKey - Optional key buffer for key rotation support (defaults to env ENCRYPTION_KEY)
+ * @returns Decrypted plaintext string
+ * @throws CriticalSecurityError if IV length is invalid
+ */
+export function decrypt(encryptedData: string, ivHex: string, tagHex: string, customKey?: Buffer): string {
+  // NIST SP 800-38D: Validate IV is exactly 12 bytes (24 hex characters)
+  if (ivHex.length !== IV_HEX_LENGTH) {
+    throw new CriticalSecurityError(`IV must be exactly ${IV_HEX_LENGTH} hex characters (${IV_BYTES} bytes), got ${ivHex.length}`);
+  }
+  
+  const key = customKey ?? getEncryptionKey();
   const iv = Buffer.from(ivHex, "hex");
   const tag = Buffer.from(tagHex, "hex");
   
