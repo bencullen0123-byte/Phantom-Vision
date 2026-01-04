@@ -6,7 +6,9 @@ import { createServer } from "http";
 import cookieParser from "cookie-parser";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
+import { v4 as uuidv4 } from "uuid";
 import { startJobWorker } from "./services/ghostHunter";
+import { logger } from "./utils/logger";
 
 const app = express();
 
@@ -32,12 +34,34 @@ declare global {
   namespace Express {
     interface Request {
       merchantId?: string;
+      traceId?: string;
     }
   }
 }
 
 // Cookie parser for OAuth state validation
 app.use(cookieParser());
+
+// =============================================================================
+// REQUEST TRACING MIDDLEWARE - Correlation IDs for debugging
+// =============================================================================
+// Attaches a unique Trace-ID to every request for log correlation.
+// The Trace-ID is returned in the X-Trace-Id response header.
+// =============================================================================
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const traceId = uuidv4();
+  req.traceId = traceId;
+  res.setHeader("X-Trace-Id", traceId);
+  
+  logger.info("Incoming Request", {
+    method: req.method,
+    url: req.url,
+    traceId,
+    userAgent: req.get("user-agent"),
+  });
+  
+  next();
+});
 
 // Session configuration with PostgreSQL store
 const PgSession = connectPgSimple(session);
@@ -115,12 +139,22 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    const traceId = req.traceId || "unknown";
 
-    res.status(status).json({ message });
-    throw err;
+    logger.error("Unhandled Error", {
+      traceId,
+      status,
+      message,
+      error: err.message,
+      stack: err.stack,
+      method: req.method,
+      url: req.url,
+    });
+
+    res.status(status).json({ message, traceId });
   });
 
   // importantly only setup vite in development and after
@@ -138,7 +172,7 @@ app.use((req, res, next) => {
 
   // Environment validation warnings
   if (!process.env.CRON_SECRET) {
-    console.warn("[PHANTOM] WARNING: CRON_SECRET not set - external cron trigger API disabled");
+    logger.warn("CRON_SECRET not set - external cron trigger API disabled", { service: "phantom" });
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
