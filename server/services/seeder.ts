@@ -407,11 +407,11 @@ export interface SeedStripeResult {
   errors?: string[];
 }
 
-export async function seedStripeData(merchantId: number): Promise<SeedStripeResult> {
+export async function seedStripeData(merchantId: string): Promise<SeedStripeResult> {
   console.log(`[CHAOS ENGINE v2] Starting Stripe Load Generator for merchant ${merchantId}...`);
   
   // Step 1: Retrieve merchant record
-  const merchant = await storage.getMerchantById(merchantId);
+  const merchant = await storage.getMerchant(merchantId);
   if (!merchant) {
     throw new Error(`Merchant with ID ${merchantId} not found.`);
   }
