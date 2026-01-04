@@ -1,7 +1,9 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { UserButton } from "@clerk/clerk-react";
+import { formatDistanceToNow } from "date-fns";
 import { LayoutDashboard, Settings, DollarSign, Clock, Shield, RefreshCw, Loader2, FileText } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -43,29 +45,6 @@ const navItems: NavItem[] = [
   { label: "Settings", path: "/settings", icon: Settings, description: "The Control Plane" },
 ];
 
-function formatCurrency(cents: number, currency: string = "usd"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(cents / 100);
-}
-
-function formatRelativeTime(dateStr: string | null): string {
-  if (!dateStr) return "Never";
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${diffDays}d ago`;
-}
 
 function SidebarNavItem({ item, isActive, showIndicator }: { item: NavItem; isActive: boolean; showIndicator?: boolean }) {
   const { state } = useSidebar();
@@ -288,7 +267,9 @@ function GlobalHeader() {
           <div className="flex items-center gap-1 text-slate-500">
             <Clock className="w-3 h-3" />
             <span className="text-xs tabular-nums" data-testid="text-last-audit">
-              {formatRelativeTime(lastAudit)}
+              {lastAudit
+                ? formatDistanceToNow(new Date(lastAudit), { addSuffix: true })
+                : "Pending Scan..."}
             </span>
           </div>
           
