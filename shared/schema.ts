@@ -66,6 +66,8 @@ export const merchants = pgTable("merchants", {
   totalVettedCount: integer("total_vetted_count").default(0).notNull(),
   // Clerk Managed Identity: links to Clerk user for SSO authentication
   clerkId: varchar("clerk_id").unique(),
+  // Clerk Organization ID: supports B2B multi-tenant scenarios
+  clerkOrgId: varchar("clerk_org_id").unique(),
   // Platform Billing (The Cash Register)
   stripeSubscriptionId: text("stripe_subscription_id"),
   subscriptionStatus: text("subscription_status").default("free").notNull(),
