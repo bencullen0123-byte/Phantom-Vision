@@ -1810,11 +1810,10 @@ export class DatabaseStorage implements IStorage {
     // Log the crypto-shredding event for audit trail
     await this.createAuditLog({
       merchantId,
+      actorId: 'system',
       action: 'CRYPTO_SHRED',
-      entityType: 'merchant',
       entityId: merchantId,
-      oldValue: null,
-      newValue: { message: 'DEK and encrypted tokens permanently destroyed per GDPR Article 17' },
+      details: 'DEK and encrypted tokens permanently destroyed per GDPR Article 17',
     });
     
     return true;
