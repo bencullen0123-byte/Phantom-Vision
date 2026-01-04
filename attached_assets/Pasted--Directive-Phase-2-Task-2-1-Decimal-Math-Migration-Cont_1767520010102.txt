@@ -1,0 +1,32 @@
+# Directive: Phase 2, Task 2.1 - Decimal Math Migration
+
+**Context**
+We are currently using native JavaScript floating-point math (IEEE 754), which creates rounding errors (e.g., 0.1 + 0.2 != 0.3). We must migrate all financial calculations to `decimal.js` to ensure "Penny-Perfect" accuracy for our audit logs and dashboard totals.
+
+**Target Files:** `server/storage.ts`, `server/services/ghostHunter.ts`, `tests/financial.test.ts`
+
+**Task 1: Install & Configure**
+1. Verify `decimal.js` is installed.
+2. In `server/services/ghostHunter.ts`, import `Decimal` from "decimal.js".
+
+**Task 2: Refactor Ghost Hunter Logic**
+1. Locate `normalizeMRR`. Replace the native division/multiplication with:
+   - `new Decimal(amount).times(12).floor().toNumber()` (or similar logic).
+2. Locate `calculateProjectedRecovery`. Replace the native math (e.g., `* 0.3`) with:
+   - `new Decimal(amount).times(0.3).round().toNumber()`.
+3. Ensure that ANY variable representing currency (cents) uses `Decimal` for intermediate calculations before being cast back to `.toNumber()` for storage.
+
+**Task 3: Refactor Storage Aggregates (`server/storage.ts`)**
+1. Locate `getMerchantStats` and `getHistoricalRevenueStats`.
+2. Refactor the `recoveryRate` calculation:
+   - *Current:* `totalGhosts > 0 ? (recoveredCount / totalGhosts) * 100 : 0`
+   - *New:* `totalGhosts > 0 ? new Decimal(recoveredCount).div(totalGhosts).times(100).toDecimalPlaces(2).toNumber() : 0`
+3. Ensure `totalRecoveredCents` aggregation uses Decimal logic if it involves summing native arrays (though SQL SUM is preferred if available).
+
+**Task 4: Update Tests (`tests/financial.test.ts`)**
+1. Update the financial unit tests to expect precise results.
+2. Add a specific test case proving that `0.1 + 0.2` logic (or equivalent currency math) is handled correctly without floating point artifacts.
+
+**Verification**
+- Run `npm test` to verify the new financial logic holds up.
+- The dashboard should still load without "NaN" errors.
