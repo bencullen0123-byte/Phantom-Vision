@@ -9,6 +9,11 @@ import { Pool } from "pg";
 import { startJobWorker } from "./services/ghostHunter";
 
 const app = express();
+
+// Strict routing: prevents case-manipulation bypasses (e.g., /API/health vs /api/health)
+app.set("case sensitive routing", true);
+app.set("strict routing", true);
+
 const httpServer = createServer(app);
 
 declare module "http" {

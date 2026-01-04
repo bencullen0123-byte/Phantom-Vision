@@ -1,17 +1,28 @@
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 
 export function requireCronSecret(req: Request, res: Response, next: NextFunction) {
-  const secret = req.headers["x-cron-secret"];
-  const expectedSecret = process.env.CRON_SECRET;
+  const headerSecret = req.headers["x-cron-secret"];
+  const envSecret = process.env.CRON_SECRET;
 
-  if (!expectedSecret) {
+  if (!envSecret) {
     console.error("[SECURITY] CRON_SECRET not configured - cron trigger disabled");
     return res.status(503).json({ error: "Cron trigger not configured" });
   }
 
-  if (secret !== expectedSecret) {
+  if (typeof headerSecret !== "string") {
+    console.warn("[SECURITY] Invalid cron secret format");
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Constant-time comparison using SHA-256 to ensure equal buffer lengths
+  // Prevents timing side-channel attacks
+  const expected = crypto.createHash("sha256").update(envSecret).digest();
+  const actual = crypto.createHash("sha256").update(headerSecret).digest();
+
+  if (!crypto.timingSafeEqual(expected, actual)) {
     console.warn("[SECURITY] Invalid cron secret attempt");
     return res.status(401).json({ error: "Unauthorized" });
   }
