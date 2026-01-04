@@ -360,6 +360,7 @@ export interface IStorage {
   markGhostRecovered(id: string, recoveryType: 'direct' | 'organic'): Promise<GhostTarget | undefined>;
   markGhostProtected(id: string): Promise<GhostTarget | undefined>;
   markGhostExhausted(id: string): Promise<GhostTarget | undefined>;
+  markGhostTerminal(id: string, terminationReason: string): Promise<GhostTarget | undefined>;
   getImpendingGhostByStripeCustomerId(stripeCustomerId: string): Promise<GhostTarget | undefined>;
   countRecoveredGhostsByMerchant(merchantId: string): Promise<number>;
   countActiveGhostsByMerchant(merchantId: string): Promise<number>;
@@ -1045,9 +1046,18 @@ export class DatabaseStorage implements IStorage {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
     
-    // Fetch both 'pending' (failed payments) and 'impending' (expiring cards)
-    // Conditions:
-    // - Status is pending or impending
+    // VAMP COMPLIANCE (Phase 3.2): Zombie Loop Prevention
+    // Fetch ghosts with eligible statuses for email outreach:
+    // - 'active': newly discovered, eligible for recovery
+    // - 'pending': legacy alias for active
+    // - 'impending': proactive - expiring card detection
+    // - 'ghost': in active recovery funnel
+    // EXCLUDED (never contacted):
+    // - 'terminal': VAMP kill-switch triggered (fraud, stolen_card, etc.)
+    // - 'recovered': payment already received
+    // - 'exhausted': max email attempts reached
+    // - 'protected': proactive protection succeeded
+    // Additional conditions:
     // - Less than 3 emails sent
     // - Not purged yet
     // - Grace period: discovered more than 4 hours ago
@@ -1061,8 +1071,10 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(piiVault, eq(ghostTargets.piiVaultId, piiVault.id))
       .where(and(
         or(
+          eq(ghostTargets.status, "active"),
           eq(ghostTargets.status, "pending"),
-          eq(ghostTargets.status, "impending")
+          eq(ghostTargets.status, "impending"),
+          eq(ghostTargets.status, "ghost")
         ),
         lt(ghostTargets.emailCount, 3),
         sql`${ghostTargets.purgeAt} > ${now}`,
@@ -1158,6 +1170,28 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ghostTargets.id, id))
       .returning();
     if (!dbRecord) return undefined;
+    
+    // Fetch vault record for hybrid decryption
+    const vaultRecord = dbRecord.piiVaultId 
+      ? (await db.select().from(piiVault).where(eq(piiVault.id, dbRecord.piiVaultId)))[0] 
+      : null;
+    return decryptGhostTarget(dbRecord, vaultRecord);
+  }
+
+  async markGhostTerminal(id: string, terminationReason: string): Promise<GhostTarget | undefined> {
+    // VAMP COMPLIANCE: Mark ghost as terminal with the reason for permanent engagement termination
+    // This prevents "Zombie Loops" - perpetual harassment of fraud/closed accounts
+    const [dbRecord] = await db
+      .update(ghostTargets)
+      .set({
+        status: "terminal",
+        terminationReason: terminationReason,
+      })
+      .where(eq(ghostTargets.id, id))
+      .returning();
+    if (!dbRecord) return undefined;
+    
+    console.log(`[COMPLIANCE] Ghost ${id} marked terminal: ${terminationReason}`);
     
     // Fetch vault record for hybrid decryption
     const vaultRecord = dbRecord.piiVaultId 

@@ -271,11 +271,15 @@ export async function processQueue(): Promise<ProcessQueueResult> {
     // Fetch both pending (failed payments) and impending (expiring cards)
     const eligibleTargets = await storage.getEligibleGhostsForEmail();
     
+    const activeCount = eligibleTargets.filter(t => t.status === 'active').length;
     const pendingCount = eligibleTargets.filter(t => t.status === 'pending').length;
+    const ghostCount = eligibleTargets.filter(t => t.status === 'ghost').length;
     const impendingCount = eligibleTargets.filter(t => t.status === 'impending').length;
     
     console.log(`[PULSE ENGINE] Found ${eligibleTargets.length} eligible targets:`);
-    console.log(`[PULSE ENGINE]   - Recovery (pending): ${pendingCount}`);
+    console.log(`[PULSE ENGINE]   - Recovery (active): ${activeCount}`);
+    console.log(`[PULSE ENGINE]   - Recovery (pending/legacy): ${pendingCount}`);
+    console.log(`[PULSE ENGINE]   - Recovery (ghost/in-funnel): ${ghostCount}`);
     console.log(`[PULSE ENGINE]   - Protection (impending): ${impendingCount}`);
     
     if (eligibleTargets.length === 0) {

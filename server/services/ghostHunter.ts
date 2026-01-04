@@ -52,6 +52,35 @@ const HARD_CODES = new Set([
   "pickup_card",
 ]);
 
+// =============================================================================
+// VAMP COMPLIANCE: Terminal Decline Codes (Kill-Switch)
+// =============================================================================
+// These codes indicate fraud, account closure, or permanent ineligibility.
+// Ghosts with these codes MUST NOT be contacted again per Visa VAMP rules.
+// Status is set to 'terminal' immediately upon detection.
+// =============================================================================
+const TERMINAL_CODES = new Set([
+  "stolen_card",
+  "fraud_detected",
+  "fraudulent",
+  "account_closed",
+  "invalid_account",
+  "do_not_honor",
+  "pickup_card",        // Bank wants card confiscated (fraud indicator)
+  "restricted_card",    // Card restricted for fraud/compliance reasons
+  "security_violation", // Security-related permanent block
+  "lost_card",          // Reported lost, should not retry
+]);
+
+/**
+ * Check if a decline code triggers the VAMP compliance kill-switch.
+ * Returns true if the code is terminal and all engagement must stop.
+ */
+function isTerminalDeclineCode(code: string | null | undefined): boolean {
+  if (!code) return false;
+  return TERMINAL_CODES.has(code.toLowerCase());
+}
+
 function categorizeDeclineCode(code: string | null | undefined): { declineType: 'soft' | 'hard' | null; failureReason: string | null } {
   if (!code) {
     return { declineType: null, failureReason: null };
@@ -722,6 +751,16 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 ? invoiceAny.payment_intent 
                 : invoiceAny.payment_intent?.id || null;
               const { failureCode, failureMessage } = await extractFailureFromPaymentIntent(stripe, paymentIntentId);
+              
+              // =============================================================================
+              // VAMP COMPLIANCE KILL-SWITCH: Check for terminal decline codes
+              // =============================================================================
+              // If a terminal code is detected (fraud, stolen, account_closed, etc.),
+              // mark the ghost as 'terminal' immediately and DO NOT queue for email.
+              // This prevents "Zombie Loops" and ensures Visa VAMP compliance.
+              // =============================================================================
+              const effectiveCode = failureCode || declineCode || null;
+              const isTerminal = isTerminalDeclineCode(effectiveCode);
 
               // Universal Revenue Intelligence: Extract ML metadata for cross-merchant learning
               const mlMetadata = await extractMLMetadata(stripe, invoice, paymentIntentId);
@@ -736,6 +775,19 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 amount,
               });
 
+              // VAMP COMPLIANCE: Determine ghost status based on terminal code detection
+              let ghostStatus: string;
+              let terminationReason: string | null = null;
+              
+              if (isTerminal) {
+                ghostStatus = "terminal";
+                terminationReason = effectiveCode;
+                console.log(`[COMPLIANCE] Terminal decline code '${effectiveCode}' detected. Engagement terminated for invoice ${invoice.id}.`);
+              } else {
+                // Set status to 'active' for new ghosts (in recovery funnel)
+                ghostStatus = "active";
+              }
+
               // ATOMIC BATCH PROCESSING: Buffer ghost for transactional commit
               ghostBuffer.push({
                 merchantId,
@@ -744,7 +796,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 amount,
                 invoiceId: invoice.id,
                 purgeAt,
-                status: "pending",
+                status: ghostStatus,
                 failureReason,
                 declineType,
                 failureCode,
@@ -756,6 +808,7 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
                 stripeErrorCode: mlMetadata.stripeErrorCode,
                 originalInvoiceDate: mlMetadata.originalInvoiceDate,
                 recoveryStrategy,
+                terminationReason,
               });
               telemetry.upsertCount++;
               
