@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { faker } from "@faker-js/faker";
 import { storage } from "../storage";
 import { decrypt, redactEmail } from "../utils/crypto";
 import { determineRecoveryStrategy } from "./ghostHunter";
@@ -390,5 +391,63 @@ export async function runSeeder(): Promise<SeederResult> {
       successes: 0
     },
     errors
+  };
+}
+
+// ============================================================
+// STRIPE LOAD GENERATOR (Chaos Engine v2)
+// Creates real customers and invoices in Stripe Test Mode
+// ============================================================
+
+export interface SeedStripeResult {
+  success: boolean;
+  message: string;
+  customersCreated?: number;
+  invoicesCreated?: number;
+  errors?: string[];
+}
+
+export async function seedStripeData(merchantId: number): Promise<SeedStripeResult> {
+  console.log(`[CHAOS ENGINE v2] Starting Stripe Load Generator for merchant ${merchantId}...`);
+  
+  // Step 1: Retrieve merchant record
+  const merchant = await storage.getMerchantById(merchantId);
+  if (!merchant) {
+    throw new Error(`Merchant with ID ${merchantId} not found.`);
+  }
+  
+  if (!merchant.encryptedToken || !merchant.iv || !merchant.tag) {
+    throw new Error("Merchant has no Stripe credentials stored. Complete OAuth first.");
+  }
+  
+  // Step 2: Decrypt the Stripe access token
+  const stripeKey = decrypt(merchant.encryptedToken, merchant.iv, merchant.tag);
+  
+  // Step 3: CRITICAL SAFETY INTERLOCK
+  // This is the most important check in the entire system.
+  // The Chaos Engine MUST NEVER pollute a live Stripe ledger.
+  if (!stripeKey.startsWith("sk_test_")) {
+    throw new Error(
+      "ABORT: Chaos Engine is restricted to Stripe Test Mode (sk_test_ keys) to prevent live ledger pollution. " +
+      "This operation requires a Stripe TEST mode API key. Production keys (sk_live_) are blocked."
+    );
+  }
+  
+  console.log("[CHAOS ENGINE v2] Safety interlock passed: Stripe Test Mode confirmed.");
+  
+  // Step 4: Initialize Stripe client
+  const stripe = new Stripe(stripeKey, { apiVersion: "2025-12-15.clover" });
+  
+  // Verify connection by fetching account
+  const account = await stripe.accounts.retrieve();
+  console.log(`[CHAOS ENGINE v2] Connected to Stripe account: ${account.id}`);
+  
+  // Scaffold complete - ready for chaos
+  return {
+    success: true,
+    message: "Safety checks passed. Stripe Test Mode confirmed. Ready for chaos.",
+    customersCreated: 0,
+    invoicesCreated: 0,
+    errors: []
   };
 }
