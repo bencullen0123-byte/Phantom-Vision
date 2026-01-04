@@ -136,8 +136,8 @@ function ConversionFunnel({ funnel, recoveryRate }: {
   funnel?: { totalGhosts: number; nudgedCount: number; clickedCount: number; recoveredCount: number; totalVetted: number };
   recoveryRate?: number;
 }) {
-  // totalVetted comes from stats.funnel with fallback logic already applied in backend
-  const totalVetted = funnel?.totalVetted || 271; // V1.0 Forensic Narrative baseline
+  // totalVetted comes from stats.funnel - live data only, no static fallbacks
+  const totalVetted = funnel?.totalVetted || 0;
   
   const steps = [
     { 

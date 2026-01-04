@@ -722,13 +722,12 @@ export class DatabaseStorage implements IStorage {
       ? new Decimal(recoveredCount).dividedBy(totalGhosts).times(100).toNumber()
       : 0;
     
-    // AUDIT PROOF: totalVetted with fallback logic
-    // Priority: merchant.totalVettedCount > estimated from grossInvoiced > minimum baseline of 271
+    // AUDIT PROOF: totalVetted from live data only (no static fallbacks)
+    // Priority: merchant.totalVettedCount > estimated from grossInvoiced > 0
     let totalVetted = merchant?.totalVettedCount || 0;
     if (totalVetted === 0) {
       // Fallback: estimate invoice count from gross invoiced (assume ~$100 average invoice)
-      const estimatedFromGross = Math.floor((merchant?.grossInvoicedCents || 0) / 10000);
-      totalVetted = estimatedFromGross > 0 ? estimatedFromGross : 271; // V1.0 Forensic Narrative baseline
+      totalVetted = Math.floor((merchant?.grossInvoicedCents || 0) / 10000);
     }
     
     return {
