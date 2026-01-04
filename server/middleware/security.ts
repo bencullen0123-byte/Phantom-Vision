@@ -36,6 +36,7 @@ export const helmetConfig = helmet({
         "'unsafe-inline'",
         "https://*.clerk.accounts.dev",
         "https://*.clerk.com",
+        "https://fonts.googleapis.com",
       ],
       imgSrc: [
         "'self'",
@@ -45,7 +46,7 @@ export const helmetConfig = helmet({
         "https://*.clerk.com",
         "https://*.stripe.com",
       ],
-      fontSrc: ["'self'", "data:"],
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
       connectSrc: [
         "'self'",
         "https://*.clerk.accounts.dev",
