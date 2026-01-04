@@ -3,6 +3,7 @@ import Decimal from "decimal.js";
 import { storage } from "../storage";
 import { decrypt, vaultDiagnostic, redactEmail } from "../utils/crypto";
 import { stripeCircuitBreaker } from "../utils/circuitBreaker";
+import { getLocalDayHour, mergeLiquidityMaps } from "../utils/timezones";
 import type { Merchant, InsertGhostTarget } from "@shared/schema";
 
 // Diagnostic Shell Constants
@@ -521,6 +522,126 @@ async function scanForImpendingRisks(
   return { risks, currency: detectedCurrency };
 }
 
+// ============================================================================
+// GOLDEN HOUR ORACLE: Timezone-Normalized Liquidity Scanning
+// ============================================================================
+// Scans successful invoices from the past year to build a liquidity map
+// showing when customers pay in their LOCAL timezone (not UTC).
+// This enables smarter recovery timing for maximum engagement.
+// ============================================================================
+
+interface GoldenHourResult {
+  lifetimeGrossVolumeCents: number;
+  liquidityMap: Record<string, number>;
+  invoicesProcessed: number;
+}
+
+async function scanForGoldenHour(
+  stripe: Stripe,
+  merchantId: string,
+  existingLiquidityMap: Record<string, number> | null
+): Promise<GoldenHourResult> {
+  const result: GoldenHourResult = {
+    lifetimeGrossVolumeCents: 0,
+    liquidityMap: {},
+    invoicesProcessed: 0,
+  };
+  
+  const oneYearAgo = Math.floor(Date.now() / 1000) - (365 * 24 * 60 * 60);
+  
+  console.log(`[GOLDEN HOUR] Starting timezone-normalized liquidity scan for merchant: ${merchantId}`);
+  
+  let hasMore = true;
+  let startingAfter: string | undefined;
+  let batchNumber = 0;
+  
+  // Use Decimal for precise accumulation
+  let grossVolumeDecimal = new Decimal(0);
+  
+  while (hasMore) {
+    batchNumber++;
+    
+    try {
+      const params: Stripe.InvoiceListParams = {
+        status: 'paid',
+        created: { gte: oneYearAgo },
+        limit: 100,
+        expand: ['data.customer'],
+      };
+      if (startingAfter) {
+        params.starting_after = startingAfter;
+      }
+      
+      const invoices = await stripeCircuitBreaker.execute(() =>
+        stripe.invoices.list(params)
+      );
+      
+      for (const invoice of invoices.data) {
+        // Skip zero-amount invoices
+        if (!invoice.amount_paid || invoice.amount_paid <= 0) continue;
+        
+        result.invoicesProcessed++;
+        
+        // Accumulate gross volume
+        grossVolumeDecimal = grossVolumeDecimal.plus(invoice.amount_paid);
+        
+        // Extract customer country for timezone normalization
+        let countryCode: string | null = null;
+        if (typeof invoice.customer === 'object' && invoice.customer) {
+          const customer = invoice.customer as Stripe.Customer;
+          countryCode = customer.address?.country || null;
+        }
+        
+        // Get payment timestamp (use status_transitions.paid_at if available)
+        const paidTimestamp = invoice.status_transitions?.paid_at || invoice.created;
+        
+        // Convert to customer's local day_hour slot
+        const dayHourSlot = getLocalDayHour(paidTimestamp, countryCode);
+        
+        // Increment the liquidity map
+        result.liquidityMap[dayHourSlot] = (result.liquidityMap[dayHourSlot] || 0) + 1;
+      }
+      
+      hasMore = invoices.has_more;
+      if (hasMore && invoices.data.length > 0) {
+        startingAfter = invoices.data[invoices.data.length - 1].id;
+      }
+      
+      // Throttle to respect rate limits
+      if (batchNumber % 5 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+    } catch (error: any) {
+      console.error(`[GOLDEN HOUR] Error fetching paid invoices at batch ${batchNumber}:`, error.message);
+      break;
+    }
+  }
+  
+  // Merge with existing liquidity map if present
+  if (existingLiquidityMap && Object.keys(existingLiquidityMap).length > 0) {
+    result.liquidityMap = mergeLiquidityMaps(existingLiquidityMap, result.liquidityMap);
+    console.log(`[GOLDEN HOUR] Merged new data with existing liquidity map`);
+  }
+  
+  result.lifetimeGrossVolumeCents = grossVolumeDecimal.round().toNumber();
+  
+  // Find peak slot for logging
+  let peakSlot = 'N/A';
+  let peakCount = 0;
+  for (const [slot, count] of Object.entries(result.liquidityMap)) {
+    if (count > peakCount) {
+      peakCount = count;
+      peakSlot = slot;
+    }
+  }
+  
+  console.log(`[GOLDEN HOUR] Scan complete: ${result.invoicesProcessed} paid invoices, $${(result.lifetimeGrossVolumeCents / 100).toFixed(2)} gross volume`);
+  console.log(`[GOLDEN HOUR] Golden Hour identified: ${peakSlot} (${peakCount} transactions)`);
+  
+  return result;
+}
+
 export async function scanMerchant(merchantId: string, forceSync: boolean = false): Promise<ScanResult & { telemetry?: TelemetryState }> {
   // DELTA SYNC: Pre-fetch merchant to get lastAuditAt anchor and cumulative grossInvoicedCents
   const merchantPreFetch = await storage.getMerchant(merchantId);
@@ -959,6 +1080,26 @@ export async function scanMerchant(merchantId: string, forceSync: boolean = fals
     } catch (error: any) {
       console.error(`[GHOST HUNTER] Proactive scan error:`, error.message);
       result.errors.push(`Proactive scan failed: ${error.message}`);
+    }
+  }
+
+  // GOLDEN HOUR ORACLE: Scan successful invoices for timezone-normalized liquidity
+  if (scanCompletedSuccessfully) {
+    try {
+      const existingMap = merchantPreFetch?.liquidityMap || null;
+      const goldenHourResult = await scanForGoldenHour(stripe, merchantId, existingMap);
+      
+      // Update merchant with liquidity intelligence
+      await storage.updateMerchantLiquidity(
+        merchantId,
+        goldenHourResult.lifetimeGrossVolumeCents,
+        goldenHourResult.liquidityMap
+      );
+      
+      console.log(`[GHOST HUNTER] Golden Hour Oracle updated: ${goldenHourResult.invoicesProcessed} transactions analyzed`);
+    } catch (error: any) {
+      console.error(`[GHOST HUNTER] Golden Hour scan error:`, error.message);
+      // Non-critical - don't add to result.errors as it shouldn't fail the scan
     }
   }
 

@@ -342,6 +342,7 @@ export interface IStorage {
   updateMerchantImpendingLeakage(id: string, impendingLeakageCents: number): Promise<Merchant | undefined>;
   updateMerchantBranding(id: string, data: { businessName?: string; supportEmail?: string; brandColor?: string; autoPilotEnabled?: boolean }): Promise<Merchant | undefined>;
   updateMerchantAuditStatus(id: string, status: 'idle' | 'in_progress' | 'completed' | 'failed'): Promise<Merchant | undefined>;
+  updateMerchantLiquidity(id: string, lifetimeGrossVolumeCents: number, liquidityMap: Record<string, number>): Promise<Merchant | undefined>;
   getHistoricalRevenueStats(merchantId: string): Promise<HistoricalRevenueStats>;
   getMonthlyTrend(merchantId: string): Promise<MonthlyTrendPoint[]>;
   getDailyPulse(merchantId: string): Promise<DailyPulsePoint[]>;
@@ -642,6 +643,15 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(merchants)
       .set({ lastAuditStatus: status })
+      .where(eq(merchants.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async updateMerchantLiquidity(id: string, lifetimeGrossVolumeCents: number, liquidityMap: Record<string, number>): Promise<Merchant | undefined> {
+    const [updated] = await db
+      .update(merchants)
+      .set({ lifetimeGrossVolumeCents, liquidityMap })
       .where(eq(merchants.id, id))
       .returning();
     return updated || undefined;
