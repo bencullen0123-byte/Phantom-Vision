@@ -128,15 +128,8 @@ export async function seedStripeData(merchantId: string): Promise<SeedStripeResu
       // Generate random amount (1000 to 50000 cents = £10 to £500)
       const amount = randomAmount(1000, 50000);
       
-      // Create invoice item
-      await stripe.invoiceItems.create({
-        customer: customer.id,
-        amount: amount,
-        currency: "gbp",
-        description: `PHANTOM Chaos Test - ${scenario.name} Scenario`,
-      });
-      
-      // Create invoice with simulated_created_at metadata
+      // EXPLICIT LINKING PATTERN (fixes zero-value invoice race condition):
+      // Step 1: Create invoice shell FIRST with auto_advance: false
       const invoice = await stripe.invoices.create({
         customer: customer.id,
         auto_advance: false,
@@ -146,9 +139,19 @@ export async function seedStripeData(merchantId: string): Promise<SeedStripeResu
           scenario: scenario.name,
         }
       });
+      
+      // Step 2: Create invoice item with EXPLICIT invoice linking
+      // This guarantees the item attaches to the correct invoice immediately
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        invoice: invoice.id, // CRITICAL: explicit linking prevents race condition
+        amount: amount,
+        currency: "gbp",
+        description: `PHANTOM Chaos Test - ${scenario.name} Scenario`,
+      });
       invoicesCreated++;
       
-      // Finalize the invoice
+      // Step 3: Finalize the invoice (now guaranteed to have the line item)
       const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
       
       // Attempt to pay with scenario token
