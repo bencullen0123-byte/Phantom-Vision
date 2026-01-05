@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -602,13 +603,17 @@ function MerchantProfileForm() {
 function SimulationEngine() {
   const { toast } = useToast();
   const { merchant, refetch } = useMerchant();
+  const [selectedCurrency, setSelectedCurrency] = useState<string>('usd');
 
   const chaosMutation = useMutation({
     mutationFn: async () => {
       if (!merchant?.id) {
         throw new Error("Merchant not found. Complete onboarding first.");
       }
-      const res = await apiRequest("POST", "/api/chaos/ignite", { merchantId: merchant.id });
+      const res = await apiRequest("POST", "/api/chaos/ignite", { 
+        merchantId: merchant.id,
+        currency: selectedCurrency 
+      });
       return res.json();
     },
     onSuccess: (data: { customersCreated?: number; invoicesCreated?: number; successfulPayments?: number; failedPayments?: number; message?: string }) => {
@@ -643,27 +648,45 @@ function SimulationEngine() {
           <div className="flex-1">
             <h3 className="text-lg font-medium text-white mb-1">Chaos Engine</h3>
             <p className="text-slate-400 text-sm mb-3">
-              Generate 50 real customers and invoices in Stripe Test Mode with weighted payment scenarios.
+              Generate 10 subscription customers with 5 months of billing history in Stripe Test Mode.
             </p>
-            <Button 
-              variant="outline" 
-              className="border-amber-500/50 text-amber-400"
-              onClick={() => chaosMutation.mutate()}
-              disabled={chaosMutation.isPending || !merchant?.id}
-              data-testid="button-ignite-chaos"
-            >
-              {chaosMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Igniting Chaos...
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4 mr-2" />
-                  Ignite Chaos
-                </>
-              )}
-            </Button>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1.5">Target Simulation Currency</label>
+                <Select value={selectedCurrency} onValueChange={setSelectedCurrency}>
+                  <SelectTrigger 
+                    className="w-32 bg-slate-800 border-slate-700 text-white"
+                    data-testid="select-chaos-currency"
+                  >
+                    <SelectValue placeholder="Currency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="usd">USD ($)</SelectItem>
+                    <SelectItem value="gbp">GBP (\u00A3)</SelectItem>
+                    <SelectItem value="eur">EUR (\u20AC)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                variant="outline" 
+                className="border-amber-500/50 text-amber-400"
+                onClick={() => chaosMutation.mutate()}
+                disabled={chaosMutation.isPending || !merchant?.id}
+                data-testid="button-ignite-chaos"
+              >
+                {chaosMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Igniting Chaos...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 mr-2" />
+                    Ignite Chaos
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>

@@ -70,8 +70,9 @@ const CUSTOMER_COUNT = 10;        // Number of subscription customers
 const MONTHS_PER_CUSTOMER = 5;    // Months of billing history per customer
 const TOTAL_INVOICES = CUSTOMER_COUNT * MONTHS_PER_CUSTOMER; // 50 total invoices
 
-export async function seedStripeData(merchantId: string): Promise<SeedStripeResult> {
-  console.log(`[CHAOS ENGINE v3] Starting Subscription Simulator for merchant ${merchantId}...`);
+export async function seedStripeData(merchantId: string, currency: string = 'usd'): Promise<SeedStripeResult> {
+  const currencyUpper = currency.toUpperCase();
+  console.log(`[CHAOS ENGINE v3] Starting Subscription Simulator for merchant ${merchantId} (${currencyUpper})...`);
   
   // Step 1: Retrieve merchant record
   const merchant = await storage.getMerchant(merchantId);
@@ -182,7 +183,7 @@ export async function seedStripeData(merchantId: string): Promise<SeedStripeResu
             customer: customer.id,
             invoice: invoice.id, // CRITICAL: explicit linking prevents race condition
             amount: subscriptionAmount,
-            currency: "gbp",
+            currency: currency.toLowerCase(),
             description: `Subscription Renewal: Professional Plan (Month ${monthNumber})`,
           });
           invoicesCreated++;

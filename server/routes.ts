@@ -1357,7 +1357,7 @@ export async function registerRoutes(
     }
 
     try {
-      const { merchantId } = req.body;
+      const { merchantId, currency = 'usd' } = req.body;
       
       if (!merchantId) {
         return res.status(400).json({
@@ -1366,8 +1366,8 @@ export async function registerRoutes(
         });
       }
       
-      console.log(`[CHAOS ENGINE v2] Ignite request for merchant ${merchantId}`);
-      const result = await seedStripeData(merchantId);
+      console.log(`[CHAOS ENGINE v3] Ignite request for merchant ${merchantId} (${currency.toUpperCase()})`);
+      const result = await seedStripeData(merchantId, currency);
       return res.json(result);
     } catch (error: any) {
       console.error("[CHAOS ENGINE v2] Ignition failed:", error.message);
