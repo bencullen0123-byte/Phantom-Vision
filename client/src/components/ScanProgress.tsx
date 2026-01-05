@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +8,16 @@ import { useActiveScan } from "@/hooks/use-active-scan";
 
 export default function ScanProgress() {
   const { data: scan, isLoading } = useActiveScan();
+  const [, setLocation] = useLocation();
+
+  // "Dopamine" Redirect: Navigate to Audit Report when scan completes
+  useEffect(() => {
+    if (scan?.progress && scan.progress >= 100) {
+      // Small delay so user sees "100% Complete" before the transition
+      const timer = setTimeout(() => setLocation('/audit'), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [scan?.progress, setLocation]);
 
   if (isLoading || !scan?.active) {
     return null;

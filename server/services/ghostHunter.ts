@@ -270,7 +270,13 @@ async function extractMLMetadata(
   };
 
   // Original invoice date (temporal anchor for recovery velocity)
-  if (invoice.created) {
+  // TIME TRAVEL: Check for Chaos Engine simulated date in metadata first
+  const simulatedDate = invoice.metadata?.simulated_created_at;
+  if (simulatedDate) {
+    // Use simulated date for realistic 12-month history from Chaos Engine
+    result.originalInvoiceDate = new Date(simulatedDate);
+  } else if (invoice.created) {
+    // Fallback to real Stripe creation timestamp
     result.originalInvoiceDate = new Date(invoice.created * 1000);
   }
 
