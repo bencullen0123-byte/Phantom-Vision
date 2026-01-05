@@ -5,22 +5,23 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(amount: number | null | undefined, currency: string = "GBP") {
-  const safeAmount = amount === null || amount === undefined || isNaN(amount) ? 0 : amount;
+export function formatCurrency(cents: number | null | undefined, currency: string = 'usd') {
+  const safeAmount = cents === null || cents === undefined || isNaN(cents) ? 0 : cents;
   
-  const safeCurrency = (currency || "GBP").toUpperCase();
+  const safeCurrency = (currency || 'usd').toUpperCase();
 
   try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
       currency: safeCurrency,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(safeAmount / 100);
   } catch (e) {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: "GBP",
+    // Fallback to USD if currency code is invalid
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
       minimumFractionDigits: 2,
     }).format(safeAmount / 100);
   }
